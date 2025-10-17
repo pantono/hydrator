@@ -240,13 +240,16 @@ class Hydrator implements HydratorInterface
      * @template T of object
      * @param class-string<T> $className
      * @param array<int,array<string,mixed>> $data
-     * @return array<T|null>
+     * @return array<T>
      */
     public function hydrateSet(string $className, array $data): array
     {
         $items = [];
         foreach ($data as $item) {
-            $items[] = $this->hydrate($className, $item);
+            $hydrated = $this->hydrate($className, $item);
+            if ($hydrated !== null) {
+                $items[] = $hydrated;
+            }
         }
 
         return $items;
