@@ -240,7 +240,7 @@ class Hydrator implements HydratorInterface
      * @template T of object
      * @param class-string<T> $className
      * @param array<int,array<string,mixed>> $data
-     * @return array<int<0,max>,T|null>
+     * @return array<T|null>
      */
     public function hydrateSet(string $className, array $data): array
     {
