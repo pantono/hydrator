@@ -235,9 +235,12 @@ class Hydrator implements HydratorInterface
         return $dep->$methodName($field);
     }
 
+
     /**
-     * @param class-string $className
-     * @param array $data
+     * @template T of object
+     * @param class-string<T> $className
+     * @param array<int,array<string,mixed>> $data
+     * @return array<int<0,max>,T|null>
      */
     public function hydrateSet(string $className, array $data): array
     {

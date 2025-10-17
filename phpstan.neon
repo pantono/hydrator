@@ -8,4 +8,3 @@ parameters:
     - "*/Tests/*"
   ignoreErrors:
     - message: '#^Method (.*)::(.*) return type has no value type specified in iterable type array.$#'
-    - message: '#^Method (.*)::(.*) has parameter (.*) with no value type specified in iterable type array.$#'
