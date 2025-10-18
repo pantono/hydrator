@@ -220,9 +220,9 @@ class Hydrator implements HydratorInterface
             return null;
         }
         $args = $attributes[0]->getArguments();
-        $service = $args['serviceName'];
-        $methodName = $args['methodName'];
-        $className = $args['className'];
+        $service = $args['serviceName'] ?? null;
+        $methodName = $args['methodName'] ?? null;
+        $className = $args['className'] ?? null;
         if ($className) {
             $dep = $this->container->getLocator()->getClassAutoWire($className);
         } else {
