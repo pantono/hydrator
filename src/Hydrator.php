@@ -59,6 +59,11 @@ class Hydrator implements HydratorInterface
         return $this->hydrateSet($className, $value);
     }
 
+    public function clearCache(string $key): void
+    {
+        $this->cache->delete($key);
+    }
+
     /**
      * @template T of object
      * @param class-string<T> $className
