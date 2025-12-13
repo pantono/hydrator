@@ -264,7 +264,7 @@ class Hydrator implements HydratorInterface
      */
     private function createProxyClass(string $className): \ReflectionClass
     {
-        $dir = ApplicationHelper::getApplicationRoot() . '/conf/cache/proxies/';
+        $dir = ApplicationHelper::getApplicationRoot() . '/cache/proxies/';
         if (!is_dir($dir)) {
             mkdir($dir, 0777, true);
         }
