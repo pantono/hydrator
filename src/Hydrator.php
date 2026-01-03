@@ -280,7 +280,12 @@ class Hydrator implements HydratorInterface
             $proxyGenerator = new ProxyGenerator();
             $proxyClass = $proxyGenerator->generateProxyClass($className);
 
-            file_put_contents($target, $proxyClass);
+            $tempFile = tempnam(dirname($target), 'proxy');
+            file_put_contents($tempFile, $proxyClass);
+            rename($tempFile, $target);
+            if (function_exists('opcache_invalidate')) {
+                opcache_invalidate($target, true);
+            }
         }
         /**
          * @var class-string $className
