@@ -13,15 +13,22 @@ use Pantono\Contracts\Attributes\Locator;
 use Pantono\Utilities\ReflectionUtilities;
 use Pantono\Contracts\Application\Cache\ApplicationCacheInterface;
 use Pantono\Utilities\CacheHelper;
+use Symfony\Component\EventDispatcher\EventDispatcher;
+use Pantono\Hydrator\Event\PreHydrateEvent;
+use Pantono\Hydrator\Event\PostHydrateEvent;
+use Pantono\Hydrator\Event\PreHydrateSetEvent;
+use Pantono\Hydrator\Event\PostHydrateSetEvent;
 
 class Hydrator implements HydratorInterface
 {
     private ContainerInterface $container;
+    private EventDispatcher $dispatcher;
     private ?ApplicationCacheInterface $cache;
 
-    public function __construct(ContainerInterface $container, ?ApplicationCacheInterface $cache = null)
+    public function __construct(ContainerInterface $container, EventDispatcher $dispatcher, ?ApplicationCacheInterface $cache = null)
     {
         $this->container = $container;
+        $this->dispatcher = $dispatcher;
         $this->cache = $cache;
     }
 
@@ -37,7 +44,7 @@ class Hydrator implements HydratorInterface
         }
         $key = CacheHelper::cleanCacheKey($key);
         /**
-         * @var array<string,mixed>|null $value
+         * @var array<int,mixed>|null $value
          */
         $value = $this->cache->getCallback($key, $callback);
         return $this->hydrate($className, $value);
@@ -54,6 +61,9 @@ class Hydrator implements HydratorInterface
             return $this->hydrateSet($className, $callback());
         }
         $key = CacheHelper::cleanCacheKey($key);
+        /**
+         * @var array<int, array<string, mixed>> $value
+         */
         $value = $this->cache->getCallback($key, $callback);
 
         return $this->hydrateSet($className, $value);
@@ -61,17 +71,19 @@ class Hydrator implements HydratorInterface
 
     public function clearCache(string $key): void
     {
-        $this->cache->delete($key);
+        if ($this->cache) {
+            $this->cache->delete($key);
+        }
     }
 
     /**
      * @template T of object
      * @param class-string<T> $className
-     * @param array<string, mixed>|null $hydrateData
+     * @param array<int, mixed>|null $hydrateData
      * @return T|null
      * @throws \ReflectionException
      */
-    public function hydrate(string $className, ?array $hydrateData = []): mixed
+    public function hydrate(string $className, ?array $hydrateData = []): ?object
     {
         if ($hydrateData === null) {
             return null;
@@ -79,6 +91,9 @@ class Hydrator implements HydratorInterface
         if (!class_exists($className)) {
             throw new \RuntimeException('Class ' . $className . ' does not exist for hydration');
         }
+        $event = new PreHydrateEvent($className, $hydrateData);
+        $this->dispatcher->dispatch($event);
+        $hydrateData = $event->getHydrateData();
         /** @var \ReflectionClass<T> $reflectionClass */
         $reflectionClass = new \ReflectionClass($className);
         /** @var T $class */
@@ -206,8 +221,11 @@ class Hydrator implements HydratorInterface
                 }
             }
         }
-
-        return $class;
+        $event = new PostHydrateEvent($className, $hydrateData, $class);
+        $this->dispatcher->dispatch($event);
+        /** @var T $result */
+        $result = $event->getResult();
+        return $result;
     }
 
     public function lookupRecord(string $className, mixed $field): mixed
@@ -246,6 +264,9 @@ class Hydrator implements HydratorInterface
      */
     public function hydrateSet(string $className, array $data): array
     {
+        $event = new PreHydrateSetEvent($className, $data);
+        $this->dispatcher->dispatch($event);
+        $data = $event->getHydrateData();
         $items = [];
         foreach ($data as $item) {
             $hydrated = $this->hydrate($className, $item);
@@ -254,7 +275,11 @@ class Hydrator implements HydratorInterface
             }
         }
 
-        return $items;
+        $event = new PostHydrateSetEvent($className, $data, $items);
+        $this->dispatcher->dispatch($event);
+        /** @var array<T> $result */
+        $result = $event->getResult();
+        return $result;
     }
 
     /**
