@@ -3,7 +3,7 @@
   "description": "Pantono hydrator",
   "type": "library",
   "require": {
-    "php": ">=8.2",
+    "php": ">=8.4",
     "pantono/contracts": "^1.0",
     "pantono/utilities": "^1.0",
     "pantono/cache": "^1.0",
