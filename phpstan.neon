@@ -8,3 +8,8 @@ parameters:
     - "*/Tests/*"
   ignoreErrors:
     - message: '#^Method (.*)::(.*) return type has no value type specified in iterable type array.$#'
+
+services:
+  - class: Pantono\Hydrator\Rules\PhpStan\LocatorMethodExistsRule
+    tags:
+      - phpstan.rules.rule
