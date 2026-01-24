@@ -13,19 +13,19 @@ use Pantono\Contracts\Attributes\Locator;
 use Pantono\Utilities\ReflectionUtilities;
 use Pantono\Contracts\Application\Cache\ApplicationCacheInterface;
 use Pantono\Utilities\CacheHelper;
-use Symfony\Component\EventDispatcher\EventDispatcher;
 use Pantono\Hydrator\Event\PreHydrateEvent;
 use Pantono\Hydrator\Event\PostHydrateEvent;
 use Pantono\Hydrator\Event\PreHydrateSetEvent;
 use Pantono\Hydrator\Event\PostHydrateSetEvent;
+use Psr\EventDispatcher\EventDispatcherInterface;
 
 class Hydrator implements HydratorInterface
 {
     private ContainerInterface $container;
-    private EventDispatcher $dispatcher;
+    private EventDispatcherInterface $dispatcher;
     private ?ApplicationCacheInterface $cache;
 
-    public function __construct(ContainerInterface $container, EventDispatcher $dispatcher, ?ApplicationCacheInterface $cache = null)
+    public function __construct(ContainerInterface $container, EventDispatcherInterface $dispatcher, ?ApplicationCacheInterface $cache = null)
     {
         $this->container = $container;
         $this->dispatcher = $dispatcher;
