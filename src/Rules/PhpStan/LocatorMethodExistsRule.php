@@ -32,7 +32,10 @@ class LocatorMethodExistsRule implements Rule
         $errors = [];
         foreach ($node->attrGroups as $attrGroup) {
             foreach ($attrGroup->attrs as $attr) {
-                if ($attr->name->toString() === Locator::class || $scope->resolveName($attr->name) === Locator::class) {
+                $attrName = $attr->name;
+                //@phpstan-ignore-next-line
+                $resolvedName = $attrName instanceof Node\Name ? $scope->resolveName($attrName) : $attrName->toString();
+                if ($resolvedName === Locator::class) {
                     $args = $attr->args;
                     $methodName = null;
                     $className = null;
@@ -45,7 +48,9 @@ class LocatorMethodExistsRule implements Rule
                                 }
                             } elseif ($arg->name->name === 'className') {
                                 if ($arg->value instanceof Node\Expr\ClassConstFetch) {
-                                    $className = $scope->resolveName($arg->value->class);
+                                    if ($arg->value->class instanceof Node\Name) {
+                                        $className = $scope->resolveName($arg->value->class);
+                                    }
                                 } elseif ($arg->value instanceof Node\Scalar\String_) {
                                     $className = $arg->value->value;
                                 }
