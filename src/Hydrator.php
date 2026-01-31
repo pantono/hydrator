@@ -50,7 +50,7 @@ class Hydrator implements HydratorInterface
         /**
          * @var array<int,mixed>|null $value
          */
-        $value = $this->cache->getCallback($key, $callback, [$className]);
+        $value = $this->cache->getCallback($key, $callback, [CacheHelper::cleanCacheKey($className)]);
         return $this->hydrate($className, $value);
     }
 
@@ -68,7 +68,7 @@ class Hydrator implements HydratorInterface
         /**
          * @var array<int, array<string, mixed>> $value
          */
-        $value = $this->cache->getCallback($key, $callback, [$className]);
+        $value = $this->cache->getCallback($key, $callback, [CacheHelper::cleanCacheKey($className)]);
 
         return $this->hydrateSet($className, $value);
     }
