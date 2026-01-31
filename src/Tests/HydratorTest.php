@@ -14,16 +14,19 @@ use Pantono\Hydrator\Tests\MockObjects\DifferentFieldModel;
 use Pantono\Hydrator\Tests\MockObjects\BoolModel;
 use Pantono\Contracts\Container\ContainerInterface;
 use Pantono\Contracts\Application\Cache\ApplicationCacheInterface;
+use Symfony\Component\EventDispatcher\EventDispatcher;
 
 class HydratorTest extends TestCase
 {
     private MockObject|ContainerInterface $container;
     private MockObject|ApplicationCacheInterface $cache;
+    private MockObject|EventDispatcher $eventDispatcher;
 
     public function setUp(): void
     {
         $this->container = $this->getMockBuilder(ContainerInterface::class)->getMock();
         $this->cache = $this->getMockBuilder(ApplicationCacheInterface::class)->getMock();
+        $this->eventDispatcher = $this->getMockBuilder(EventDispatcher::class)->getMock();
     }
 
     public function testSimpleHydrate(): void
@@ -132,33 +135,29 @@ class HydratorTest extends TestCase
         $cacheKey = 'test_key';
         $data = ['value' => 'cached_value'];
 
+        $callback = fn() => $data;
         // First call - cache miss
         $this->cache->expects($this->once())
-            ->method('get')
-            ->with($this->equalTo('test_key'))
-            ->willReturn(null);
-
-        $this->cache->expects($this->once())
-            ->method('set')
+            ->method('getCallback')
             ->with(
                 $this->equalTo('test_key'),
-                $this->callback(function ($obj) {
-                    return $obj->getValue() === 'cached_value';
-                })
-            );
+                $callback,
+                [$testClass::class]
+            )
+            ->willReturn($data);
+
 
         $result = $this->getHydrator()->hydrateCached(
             $cacheKey,
             $className,
-            fn() => $data
+            $callback
         );
-
         $this->assertSame('cached_value', $result->getValue());
     }
 
 
     private function getHydrator(): Hydrator
     {
-        return new Hydrator($this->container, $this->cache);
+        return new Hydrator($this->container, $this->eventDispatcher, $this->cache);
     }
 }

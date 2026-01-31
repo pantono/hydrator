@@ -2,10 +2,12 @@
 
 namespace Pantono\Hydrator\Tests\MockObjects;
 
+use DateTimeInterface;
+
 class DateTimeModel
 {
     private int $id;
-    private \DateTimeInterface $date;
+    private DateTimeInterface $date;
 
     public function getId(): int
     {
@@ -17,12 +19,12 @@ class DateTimeModel
         $this->id = $id;
     }
 
-    public function getDate(): \DateTimeInterface
+    public function getDate(): DateTimeInterface
     {
         return $this->date;
     }
 
-    public function setDate(\DateTimeInterface $date): void
+    public function setDate(DateTimeInterface $date): void
     {
         $this->date = $date;
     }

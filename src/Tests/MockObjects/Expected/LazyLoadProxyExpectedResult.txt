@@ -5,6 +5,7 @@ use Pantono\Contracts\Application\Proxy\ProxyInterface;
 use Pantono\Hydrator\Tests\MockObjects\BoolModel;
 use Pantono\Hydrator\Tests\MockObjects\LazyLoadModel;
 use Pantono\Hydrator\Traits\LocatorAwareTrait;
+use Pantono\Utilities\EphemeralCacheHelper;
 
 class LazyLoadModelProxyClass extends LazyLoadModel implements ProxyInterface
 {

@@ -11,6 +11,9 @@ use Nette\PhpGenerator\PsrPrinter;
 use ReflectionNamedType;
 use Pantono\Hydrator\Traits\LocatorAwareTrait;
 use Pantono\Utilities\ReflectionUtilities;
+use Pantono\Hydrator\Model\PantonoReflectionModel;
+use Pantono\Hydrator\Model\PantonoReflectionProperty;
+use Pantono\Utilities\EphemeralCacheHelper;
 
 class ProxyGenerator
 {
@@ -27,6 +30,7 @@ class ProxyGenerator
         $namespace->addUse(LocatorAwareTrait::class);
         $class->addTrait(LocatorAwareTrait::class);
         $namespace->addUse($className);
+        $namespace->addUse(EphemeralCacheHelper::class);
         $namespace->addUse(ProxyInterface::class);
         $class->addImplement(ProxyInterface::class);
 
@@ -37,49 +41,36 @@ class ProxyGenerator
         $getterMethod->setReturnType('void');
         $getterMethod->addParameter('params')->setType('array');
         $getterMethod->setBody('$this->hydratorParams = $params;');
-
-        foreach ($reflection->getProperties() as $property) {
-            $lazy = false;
-            $hydrator = null;
-            $config = ReflectionUtilities::parseAttributesIntoConfig($property);
-            if (isset($config['lazy'])) {
-                $lazy = $config['lazy'];
-            }
-            if (isset($config['hydrator'])) {
-                $hydrator = $config['hydrator'];
-            }
-            $fieldName = $config['field_name'];
-
-            if ($lazy === true && $hydrator !== null && $fieldName) {
-                $getter = lcfirst(StringUtilities::camelCase('get' . ucfirst($property->getName())));
-                $setter = lcfirst(StringUtilities::camelCase('set' . ucfirst($property->getName())));
-                [$lookupDependency, $lookupMethod] = explode('::', $hydrator);
-                if ($fieldName === '$this') {
-                    $lookupValue = '$this';
-                } else {
-                    $lookupValue = "\$this->hydratorParams['$fieldName']";
+        $pantonoReflection = new PantonoReflectionModel($className);
+        foreach ($pantonoReflection->getProperties() as $property) {
+            $fieldName = $property->getFieldName();
+            $methodName = $property->getLocatorMethodName();
+            $targetType = $property->getTargetType();
+            $oneToOne = $property->getOneToOne();
+            $proxyMethod = false;
+            $proxySingleCachedLookup = false;
+            if ($oneToOne) {
+                if (class_exists($oneToOne)) {
+                    $proxySingleCachedLookup = true;
                 }
-                $locatorMethod = 'loadDependency';
-                if ($config['hydrator_class'] !== null) {
-                    $locatorMethod = 'getClassAutoWire';;
-                    $lookupDependency = $config['hydrator_class'];
-                }
+            } elseif ($targetType && class_exists($targetType)) {
+                $proxySingleCachedLookup = true;
+            }
+            if ($property->isLazy() === true && $methodName !== null && $fieldName) {
+                $proxyMethod = true;
+            }
+            $getter = $property->getGetter();
+            $setter = $property->getSetter();
+            $methodBody = null;
+            if ($proxyMethod) {
+                $methodBody = $this->liveLookupMethod($property, $namespace);
+            }
+            if ($proxySingleCachedLookup && !$methodBody) {
+                $methodBody = $this->singleCachedLookupMethod($property, $namespace);
+            }
+            if ($methodBody) {
                 $getterMethod = $this->cloneMethod($reflection->getMethod($getter), $class, $namespace);
-                $body = <<<METHOD_BODY
-global \$app;
-\$parentValue = parent::$getter();
-if (isset(\$this->completedLookups['$getter'])) {
-    return \$parentValue;
-}
-\$this->completedLookups['$getter'] = true;
-\$value = $lookupValue?\$this->getLocator()->$locatorMethod('$lookupDependency')->$lookupMethod($lookupValue):null;
-if (\$value) {
-    parent::{$setter}(\$value);
-}
-return parent::{$getter}();
-METHOD_BODY;
-                $getterMethod->setBody($body);
-
+                $getterMethod->setBody($methodBody);
                 if ($reflection->hasMethod($setter)) {
                     $sourceSetter = $reflection->getMethod($setter);
                     $method = $this->cloneMethod($sourceSetter, $class, $namespace);
@@ -123,5 +114,65 @@ SETTER_BODY;
             )->setType($parameter->getType())->setNullable($parameter->allowsNull());
         }
         return $method;
+    }
+
+    private function liveLookupMethod(PantonoReflectionProperty $property, PhpNamespace $namespace): string
+    {
+        $getter = $property->getGetter();
+        $setter = $property->getSetter();
+        $fieldName = $property->getFieldName();
+        if ($fieldName === '$this') {
+            $lookupValue = '$this';
+        } else {
+            $lookupValue = "\$this->hydratorParams['$fieldName']";
+        }
+
+        if ($property->getLocatorClassName()) {
+            $locatorMethod = 'getClassAutoWire';
+            $lookupDependency = $property->getLocatorClassName();
+        } elseif ($property->getLocatorService()) {
+            $locatorMethod = 'loadDependency';
+            $lookupDependency = $property->getLocatorService();
+        } else {
+            throw new \RuntimeException('Cannot generate proxy method for property ' . $property->getFieldName());
+        }
+        $lookupMethod = $property->getLocatorMethodName();
+        return <<<METHOD_BODY
+global \$app;
+\$parentValue = parent::$getter();
+if (isset(\$this->completedLookups['$getter'])) {
+    return \$parentValue;
+}
+\$this->completedLookups['$getter'] = true;
+\$value = $lookupValue?\$this->getLocator()->$locatorMethod('$lookupDependency')->$lookupMethod($lookupValue):null;
+if (\$value) {
+    parent::{$setter}(\$value);
+}
+return parent::{$getter}();
+METHOD_BODY;
+    }
+
+    private function singleCachedLookupMethod(PantonoReflectionProperty $property, PhpNamespace $namespace): string
+    {
+        $setter = $property->getSetter();
+        $getter = $property->getGetter();
+        $fieldName = $property->getFieldName();
+        $lookupValue = "\$this->hydratorParams['$fieldName']";
+        $model = $property->getType();
+        return <<<EAGER
+\$cachedValue = EphemeralCacheHelper::get('{$model}__' . $lookupValue);
+/**
+* @var \Pantono\Hydrator\Hydrator \$hydrator
+*/
+\$hydrator = \$this->getLocator()->loadDependency('Hydrator');
+if (!\$cachedValue) {
+    \$value = \$hydrator->lookupRecord(\\$model::class, $lookupValue); 
+} else {
+    \$value = \$hydrator->hydrate(\\$model::class, \$cachedValue);
+}
+\$this->completedLookups['$getter'] = true;
+parent::{$setter}(\$value);
+return \$value;
+EAGER;
     }
 }

@@ -14,8 +14,8 @@ class ProxyGeneratorTest extends TestCase
         $output = $generator->generateProxyClass(LazyLoadModel::class);
 
         $this->assertEquals(
-            $output,
-            file_get_contents(__DIR__ . '/MockObjects/Expected/LazyLoadProxyExpectedResult.txt')
+            file_get_contents(__DIR__ . '/MockObjects/Expected/LazyLoadProxyExpectedResult.txt'),
+            $output
         );
     }
 }

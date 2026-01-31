@@ -4,13 +4,11 @@ declare(strict_types=1);
 
 namespace Pantono\Hydrator;
 
-use Pantono\Utilities\StringUtilities;
 use Pantono\Utilities\DateTimeParser;
 use Pantono\Utilities\ApplicationHelper;
 use Pantono\Contracts\Container\ContainerInterface;
 use Pantono\Contracts\Hydrator\HydratorInterface;
 use Pantono\Contracts\Attributes\Locator;
-use Pantono\Utilities\ReflectionUtilities;
 use Pantono\Contracts\Application\Cache\ApplicationCacheInterface;
 use Pantono\Utilities\CacheHelper;
 use Pantono\Hydrator\Event\PreHydrateEvent;
@@ -18,12 +16,19 @@ use Pantono\Hydrator\Event\PostHydrateEvent;
 use Pantono\Hydrator\Event\PreHydrateSetEvent;
 use Pantono\Hydrator\Event\PostHydrateSetEvent;
 use Psr\EventDispatcher\EventDispatcherInterface;
+use Pantono\Hydrator\Model\PantonoReflectionModel;
+use Pantono\Hydrator\Repository\EagerLoadRepository;
+use Pantono\Utilities\EphemeralCacheHelper;
 
 class Hydrator implements HydratorInterface
 {
     private ContainerInterface $container;
     private EventDispatcherInterface $dispatcher;
     private ?ApplicationCacheInterface $cache;
+    /**
+     * @var array<class-string,array<int|string>>
+     */
+    private array $pendingModelLookups = [];
 
     public function __construct(ContainerInterface $container, EventDispatcherInterface $dispatcher, ?ApplicationCacheInterface $cache = null)
     {
@@ -46,7 +51,7 @@ class Hydrator implements HydratorInterface
         /**
          * @var array<int,mixed>|null $value
          */
-        $value = $this->cache->getCallback($key, $callback);
+        $value = $this->cache->getCallback($key, $callback, [$className]);
         return $this->hydrate($className, $value);
     }
 
@@ -64,7 +69,7 @@ class Hydrator implements HydratorInterface
         /**
          * @var array<int, array<string, mixed>> $value
          */
-        $value = $this->cache->getCallback($key, $callback);
+        $value = $this->cache->getCallback($key, $callback, [$className]);
 
         return $this->hydrateSet($className, $value);
     }
@@ -93,6 +98,7 @@ class Hydrator implements HydratorInterface
         }
         $event = new PreHydrateEvent($className, $hydrateData);
         $this->dispatcher->dispatch($event);
+        $pantonoReflection = new PantonoReflectionModel($className);
         $hydrateData = $event->getHydrateData();
         /** @var \ReflectionClass<T> $reflectionClass */
         $reflectionClass = new \ReflectionClass($className);
@@ -101,19 +107,7 @@ class Hydrator implements HydratorInterface
         if (empty($hydrateData)) {
             return null;
         }
-        $properties = [];
-        $isLazy = false;
-        foreach ($reflectionClass->getProperties() as $property) {
-            $config = ReflectionUtilities::parseAttributesIntoConfig($property);
-            $properties[] = [
-                'config' => $config,
-                'reflection_property' => $property
-            ];
-            if ($config['lazy'] === true) {
-                $isLazy = true;
-            }
-        }
-        if ($isLazy === true) {
+        if ($pantonoReflection->isCreateProxy()) {
             /** @var \ReflectionClass<T> $reflectionClass */
             $reflectionClass = $this->createProxyClass($className);
             /** @var T $class */
@@ -122,98 +116,117 @@ class Hydrator implements HydratorInterface
                 $class->setHydratorParams($hydrateData);
             }
         }
-        foreach ($properties as $propertyInfo) {
-            $config = $propertyInfo['config'];
-            $property = $propertyInfo['reflection_property'];
-            $field = $config['field_name'] ?: StringUtilities::snakeCase($property->getName());
-            $type = $config['type'] ?? '';
+        $isEagerLoad = $pantonoReflection->isEagerLoad();
+        foreach ($pantonoReflection->getProperties() as $property) {
+            $field = $property->getFieldName();
+            $type = $property->getType();
             /**
              * @var int|string|null $data
              */
             $data = $hydrateData[$field] ?? null;
             if ($data !== null || $field === '$this') {
-                if ($config['lazy'] === true) {
+                if ($property->isLazy() === true) {
                     continue;
                 }
-                if ($config['hydrator'] !== null) {
-                    [$dependencyString, $method] = explode('::', $config['hydrator']);
-                    if ($field === '$this') {
-                        $data = $class;
-                    }
+                $locator = $property->getLocator();
+                if ($locator !== null) {
                     $dependency = null;
-                    if (class_exists($dependencyString)) {
-                        $dependency = $this->container->getLocator()->getClassAutoWire($dependencyString);
-                    } else {
-                        $dependency = $this->container->getLocator()->loadDependency('@' . $dependencyString);
+                    if ($locator['className']) {
+                        $dependency = $this->container->getLocator()->getClassAutoWire($locator['className']);
+                    } elseif ($locator['serviceName']) {
+                        $dependency = $this->container->getLocator()->loadDependency($locator['serviceName']);
                     }
-                    $data = $dependency->$method($data);
+                    if ($dependency) {
+                        $method = $locator['methodName'];
+                        $data = $dependency->$method($data);
+                    }
                 } else {
-                    $type = strtolower($type);
-                    if (str_starts_with($type, '?')) {
-                        $type = substr($type, 1);
-                    }
-                    if ($type === 'int') {
-                        $data = intval($data);
-                    }
-                    if ($type === 'float') {
-                        $data = floatval($data);
-                    }
-                    if ($type === 'bool') {
-                        if ($data === 'yes') {
-                            $data = true;
+                    $filter = $property->getFilter();
+                    if ($property->isTypeBuiltIn() && is_string($type)) {
+                        $type = strtolower($type);
+                        if (str_starts_with($type, '?')) {
+                            $type = substr($type, 1);
                         }
-                        if ($data === 'no') {
-                            $data = false;
+                        if ($type === 'int') {
+                            $data = intval($data);
                         }
-                        $data = (bool)$data;
-                    }
-                    if (str_starts_with($type, '\\')) {
-                        $type = substr($type, 1);
-                    }
-                    if ($type === 'datetime' || $type === 'datetimeinterface') {
-                        if ($config['format'] !== null) {
-                            $data = \DateTime::createFromFormat($config['format'], strval($data));
-                        } else {
-                            $data = DateTimeParser::parseDate(strval($data));
+                        if ($type === 'float') {
+                            $data = floatval($data);
                         }
-                    }
-                    if ($type === 'datetimeimmutable') {
-                        /**
-                         * @var string $data
-                         */
-                        if ($config['format'] !== null) {
-                            $data = \DateTimeImmutable::createFromFormat($config['format'], strval($data));
-                        } else {
-                            $data = DateTimeParser::parseDateImmutable(strval($data));
+                        if ($type === 'bool') {
+                            if ($data === 'yes') {
+                                $data = true;
+                            }
+                            if ($data === 'no') {
+                                $data = false;
+                            }
+                            $data = (bool)$data;
                         }
+                        if ($type === 'string' && $filter === 'trim' && is_string($data)) {
+                            $data = trim($data);
+                        }
+                    } elseif ($property->isDateType()) {
+                        $format = $property->getDateFormat();
+                        if ($type === 'DateTime' || $type === 'DateTimeInterface') {
+                            if ($format) {
+                                $data = \DateTime::createFromFormat($format, strval($data));
+                            } else {
+                                $data = DateTimeParser::parseDate(strval($data));
+                            }
+                        }
+                        if ($type === 'DateTimeImmutable') {
+                            /**
+                             * @var string $data
+                             */
+                            if ($format !== null) {
+                                $data = \DateTimeImmutable::createFromFormat($format, strval($data));
+                            } else {
+                                $data = DateTimeParser::parseDateImmutable(strval($data));
+                            }
+                        }
+                    } elseif ($property->getType() === 'array' && $property->getFilter()) {
+                        $filter = $property->getFilter();
+                        if ($data !== null) {
+                            if ($filter === 'json_decode') {
+                                $data = json_decode((string)$data, true);
+                            }
+                            if ($filter === 'explode') {
+                                if (!$data) {
+                                    $data = [];
+                                } elseif (is_array($data)) {
+                                    $data = array_filter((array)$data, function ($value) {
+                                        return $value !== '';
+                                    });
+                                } else {
+                                    if (is_string($data)) {
+                                        $data = array_filter(explode(',', $data), function ($value) {
+                                            return $value !== '';
+                                        });
+                                    }
+                                }
+                            }
+                            if ($filter === 'array_from_string') {
+                                if (is_string($data)) {
+                                    $data = $this->createArrayFromFieldString((string)$data);
+                                }
+                            }
+                        }
+                    } else {
+                        if ($isEagerLoad && $data) {
+                            $targetType = $property->getTargetType();
+                            $oneToOne = $property->getOneToOne();
+                            if ($oneToOne) {
+                                if (class_exists($oneToOne)) {
+                                    $this->addDatabaseLookup($oneToOne, $data);
+                                }
+                            } elseif ($targetType && class_exists($targetType)) {
+                                $this->addDatabaseLookup($targetType, $data);
+                            }
+                        }
+                        $data = null;
                     }
                 }
-                $setter = lcfirst(StringUtilities::camelCase('set' . ucfirst($property->getName())));
-                if ($config['filter']) {
-                    if ($config['filter'] === 'trim') {
-                        $data = trim($data);
-                    }
-                    if ($config['filter'] === 'json_decode') {
-                        $data = json_decode($data, true);
-                    }
-                    if ($config['filter'] === 'explode') {
-                        if (!$data) {
-                            $data = [];
-                        } elseif (is_array($data)) {
-                            $data = array_filter((array)$data, function ($value) {
-                                return $value !== '';
-                            });
-                        } else {
-                            $data = strval($data);
-                            $data = array_filter(explode(',', $data), function ($value) {
-                                return $value !== '';
-                            });
-                        }
-                    }
-                    if ($config['filter'] === 'array_from_string') {
-                        $data = $this->createArrayFromFieldString($data);
-                    }
-                }
+                $setter = $property->getSetter();
                 $hasSetter = $reflectionClass->hasMethod($setter);
                 $parentHasSetter = $reflectionClass->hasMethod($setter);
                 if (($hasSetter || $parentHasSetter) && $data !== null) {
@@ -233,7 +246,13 @@ class Hydrator implements HydratorInterface
         if (!class_exists($className)) {
             throw new \RuntimeException('Class ' . $className . ' does not exist');
         }
-
+        if ($this->cache) {
+            $key = $className . '__' . $field;
+            $value = EphemeralCacheHelper::get($key);
+            if ($value && is_array($value)) {
+                return $this->hydrate($className, $value);
+            }
+        }
         $class = new \ReflectionClass($className);
         $attributes = $class->getAttributes(Locator::class);
         if (empty($attributes)) {
@@ -277,6 +296,7 @@ class Hydrator implements HydratorInterface
 
         $event = new PostHydrateSetEvent($className, $data, $items);
         $this->dispatcher->dispatch($event);
+        $this->doPendingCacheLookups();
         /** @var array<T> $result */
         $result = $event->getResult();
         return $result;
@@ -342,5 +362,47 @@ class Hydrator implements HydratorInterface
         }
 
         return array_filter($fields);
+    }
+
+    /**
+     * @param class-string $className
+     * @param string|int $id
+     * @return void
+     */
+    private function addDatabaseLookup(string $className, string|int $id): void
+    {
+        if (!isset($this->pendingModelLookups[$className])) {
+            $this->pendingModelLookups[$className] = [];
+        }
+        $this->pendingModelLookups[$className][] = $id;
+    }
+
+    private function doPendingCacheLookups(): void
+    {
+        if (empty($this->pendingModelLookups)) {
+            return;
+        }
+        $repo = $this->getRepository();
+        foreach ($this->pendingModelLookups as $model => $ids) {
+            $pantonoReflection = new PantonoReflectionModel($model);
+            $idColumn = $pantonoReflection->getDatabaseIdColumn();
+            if (!$idColumn) {
+                throw new \RuntimeException('No ID column set on model ' . $model . ' for eager loading');
+            }
+            $output = $repo->lookupRecords($model, $ids);
+            foreach ($output as $row) {
+                EphemeralCacheHelper::setItem($model . '__' . $idColumn, $row);
+            }
+            unset($this->pendingModelLookups[$model]);
+        }
+    }
+
+    private function getRepository(): EagerLoadRepository
+    {
+        $repo = $this->container->getLocator()->getClassAutoWire(EagerLoadRepository::class);
+        if ($repo instanceof EagerLoadRepository) {
+            return $repo;
+        }
+        throw new \RuntimeException('Failed to get EagerLoadRepository instance');
     }
 }
