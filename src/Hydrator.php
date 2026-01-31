@@ -137,6 +137,9 @@ class Hydrator implements HydratorInterface
                     }
                     if ($dependency) {
                         $method = $locator['methodName'];
+                        if ($property->getFieldName() === '$this') {
+                            $data = $class;
+                        }
                         $data = $dependency->$method($data);
                     }
                 } else {
@@ -386,7 +389,7 @@ class Hydrator implements HydratorInterface
             $pantonoReflection = new PantonoReflectionModel($model);
             $idColumn = $pantonoReflection->getDatabaseIdColumn();
             if (!$idColumn) {
-                throw new \RuntimeException('No ID column set on model ' . $model . ' for eager loading');
+                return;
             }
             $output = $repo->lookupRecords($model, $ids);
             foreach ($output as $row) {
