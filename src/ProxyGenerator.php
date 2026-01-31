@@ -4,13 +4,11 @@ namespace Pantono\Hydrator;
 
 use Nette\PhpGenerator\PhpNamespace;
 use Pantono\Contracts\Application\Proxy\ProxyInterface;
-use Pantono\Utilities\StringUtilities;
 use Nette\PhpGenerator\ClassType;
 use Nette\PhpGenerator\Method;
 use Nette\PhpGenerator\PsrPrinter;
 use ReflectionNamedType;
 use Pantono\Hydrator\Traits\LocatorAwareTrait;
-use Pantono\Utilities\ReflectionUtilities;
 use Pantono\Hydrator\Model\PantonoReflectionModel;
 use Pantono\Hydrator\Model\PantonoReflectionProperty;
 use Pantono\Utilities\EphemeralCacheHelper;
@@ -160,7 +158,8 @@ METHOD_BODY;
         $lookupValue = "\$this->hydratorParams['$fieldName']";
         $model = $property->getType();
         return <<<EAGER
-\$cachedValue = EphemeralCacheHelper::get('{$model}__' . $lookupValue);
+\$key = \Pantono\Utilities\CacheHelper::cleanCacheKey('{$model}__' . $lookupValue);
+\$cachedValue = EphemeralCacheHelper::get(\$key);
 /**
 * @var \Pantono\Hydrator\Hydrator \$hydrator
 */

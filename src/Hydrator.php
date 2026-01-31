@@ -391,7 +391,7 @@ class Hydrator implements HydratorInterface
             }
             $output = $repo->lookupRecords($model, $ids);
             foreach ($output as $row) {
-                $key = CacheHelper::cleanCacheKey($model . '__' . $idColumn);
+                $key = CacheHelper::cleanCacheKey($model . '__' . $row[$idColumn]);
                 EphemeralCacheHelper::setItem($key, $row);
             }
             unset($this->pendingModelLookups[$model]);
