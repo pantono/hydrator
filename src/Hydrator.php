@@ -247,7 +247,7 @@ class Hydrator implements HydratorInterface
             throw new \RuntimeException('Class ' . $className . ' does not exist');
         }
         if ($this->cache) {
-            $key = $className . '__' . $field;
+            $key = CacheHelper::cleanCacheKey($className . '__' . $field);
             $value = EphemeralCacheHelper::get($key);
             if ($value && is_array($value)) {
                 return $this->hydrate($className, $value);
@@ -391,7 +391,8 @@ class Hydrator implements HydratorInterface
             }
             $output = $repo->lookupRecords($model, $ids);
             foreach ($output as $row) {
-                EphemeralCacheHelper::setItem($model . '__' . $idColumn, $row);
+                $key = CacheHelper::cleanCacheKey($model . '__' . $idColumn);
+                EphemeralCacheHelper::setItem($key, $row);
             }
             unset($this->pendingModelLookups[$model]);
         }
