@@ -402,7 +402,7 @@ class Hydrator implements HydratorInterface
 
     private function getRepository(): EagerLoadRepository
     {
-        $repo = $this->container->getLocator()->getClassAutoWire(EagerLoadRepository::class);
+        $repo = $this->container->getLocator()->loadDependency(':' . EagerLoadRepository::class);
         if ($repo instanceof EagerLoadRepository) {
             return $repo;
         }
