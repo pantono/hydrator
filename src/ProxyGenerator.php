@@ -61,10 +61,10 @@ class ProxyGenerator
             $setter = $property->getSetter();
             $methodBody = null;
             if ($proxyMethod) {
-                $methodBody = $this->liveLookupMethod($property, $namespace);
+                $methodBody = $this->liveLookupMethod($property);
             }
             if ($proxySingleCachedLookup && !$methodBody) {
-                $methodBody = $this->singleCachedLookupMethod($property, $namespace);
+                $methodBody = $this->singleCachedLookupMethod($property);
             }
             if ($methodBody) {
                 $getterMethod = $this->cloneMethod($reflection->getMethod($getter), $class, $namespace);
@@ -114,7 +114,7 @@ SETTER_BODY;
         return $method;
     }
 
-    private function liveLookupMethod(PantonoReflectionProperty $property, PhpNamespace $namespace): string
+    private function liveLookupMethod(PantonoReflectionProperty $property): string
     {
         $getter = $property->getGetter();
         $setter = $property->getSetter();
@@ -150,7 +150,7 @@ return parent::{$getter}();
 METHOD_BODY;
     }
 
-    private function singleCachedLookupMethod(PantonoReflectionProperty $property, PhpNamespace $namespace): string
+    private function singleCachedLookupMethod(PantonoReflectionProperty $property): string
     {
         $setter = $property->getSetter();
         $getter = $property->getGetter();
