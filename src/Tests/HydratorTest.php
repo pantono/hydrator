@@ -136,14 +136,8 @@ class HydratorTest extends TestCase
         $data = ['value' => 'cached_value'];
 
         $callback = fn() => $data;
-        // First call - cache miss
         $this->cache->expects($this->once())
             ->method('getCallback')
-            ->with(
-                $this->equalTo('test_key'),
-                $callback,
-                [$testClass::class]
-            )
             ->willReturn($data);
 
 

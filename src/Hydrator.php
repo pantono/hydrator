@@ -16,8 +16,9 @@ use Pantono\Hydrator\Event\PostHydrateEvent;
 use Pantono\Hydrator\Event\PreHydrateSetEvent;
 use Pantono\Hydrator\Event\PostHydrateSetEvent;
 use Psr\EventDispatcher\EventDispatcherInterface;
-use Pantono\Hydrator\Model\PantonoReflectionModel;
+use Pantono\Utilities\Model\PantonoReflectionModel;
 use Pantono\Hydrator\Repository\EagerLoadRepository;
+use Pantono\Utilities\EphemeralCacheHelper;
 
 class Hydrator implements HydratorInterface
 {
@@ -397,7 +398,7 @@ class Hydrator implements HydratorInterface
             $output = $repo->lookupRecords($model, $ids);
             foreach ($output as $row) {
                 $key = CacheHelper::cleanCacheKey($model . '__' . $row[$idColumn]);
-                $this->cache->set($key, $row);
+                EphemeralCacheHelper::setItem($key, $row);
             }
             unset($this->pendingModelLookups[$model]);
         }

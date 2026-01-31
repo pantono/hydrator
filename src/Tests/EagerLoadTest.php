@@ -8,13 +8,13 @@ use PHPUnit\Framework\MockObject\MockObject;
 use Pantono\Contracts\Container\ContainerInterface;
 use Pantono\Contracts\Application\Cache\ApplicationCacheInterface;
 use Symfony\Component\EventDispatcher\EventDispatcher;
-use Pantono\Hydrator\Events\EagerLoadModelEvents;
-use Pantono\Hydrator\Event\PreHydrateSetEvent;
 use Pantono\Hydrator\Tests\MockObjects\EagerLoadModel;
 use Pantono\Hydrator\Tests\MockObjects\DatabaseLookupModel;
 use Pantono\Hydrator\Repository\EagerLoadRepository;
 use Pantono\Contracts\Locator\LocatorInterface;
 use Pantono\Hydrator\Locator\StaticLocator;
+use Pantono\Hydrator\Tests\MockObjects\LazyLoadModelCollection;
+use Pantono\Hydrator\Tests\MockServices\MockLookupService;
 
 class EagerLoadTest extends TestCase
 {
@@ -48,6 +48,20 @@ class EagerLoadTest extends TestCase
         $this->assertEquals($lookup, $output[0]->getLookupModel());
     }
 
+    public function testEagerLoadCollection()
+    {
+        $hydrator = $this->getHydrator();
+        $locator = $this->getMockBuilder(LocatorInterface::class)->getMock();
+        StaticLocator::setLocator($locator);
+        $service = new MockLookupService();
+        $locator->expects($this->once())->method('getClassAutoWire')->with(MockLookupService::class)->willReturn($service);
+        $this->container->expects($this->once())->method('getLocator')->willReturn($locator);
+        $output = $hydrator->hydrateSet(LazyLoadModelCollection::class, [['id' => 1]]);
+        $expected = new LazyLoadModelCollection();
+        $expected->setCategories([['id' => 1]]);
+        $this->assertEquals($expected, $output[0]);
+    }
+
     public function testEagerLoadNotCached()
     {
         $expected = new EagerLoadModel();
@@ -69,8 +83,9 @@ class EagerLoadTest extends TestCase
         $repo = $this->getMockBuilder(EagerLoadRepository::class)->disableOriginalConstructor()->getMock();
         $locator = $this->getMockBuilder(LocatorInterface::class)->getMock();
         StaticLocator::setLocator($locator);
-        $locator->expects($this->once())->method('loadDependency')->with('Hydrator')->willReturn($hydrator);
-        $locator->expects($this->once())->method('getClassAutoWire')->with(EagerLoadRepository::class)->willReturn($repo);
+        $locator->expects($this->any())->method('loadDependency')->willReturnOnConsecutiveCalls(
+            $repo, $hydrator
+        );
         $this->container->expects($this->once())->method('getLocator')->willReturn($locator);
         return $repo;
     }

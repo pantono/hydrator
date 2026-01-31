@@ -9,8 +9,8 @@ use Nette\PhpGenerator\Method;
 use Nette\PhpGenerator\PsrPrinter;
 use ReflectionNamedType;
 use Pantono\Hydrator\Traits\LocatorAwareTrait;
-use Pantono\Hydrator\Model\PantonoReflectionModel;
-use Pantono\Hydrator\Model\PantonoReflectionProperty;
+use Pantono\Utilities\Model\PantonoReflectionModel;
+use Pantono\Utilities\Model\PantonoReflectionProperty;
 use Pantono\Utilities\EphemeralCacheHelper;
 
 class ProxyGenerator
