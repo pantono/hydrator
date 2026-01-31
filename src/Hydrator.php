@@ -245,6 +245,9 @@ class Hydrator implements HydratorInterface
 
     public function lookupRecord(string $className, mixed $field): mixed
     {
+        if (!$field) {
+            return null;
+        }
         if (!class_exists($className)) {
             throw new \RuntimeException('Class ' . $className . ' does not exist');
         }
