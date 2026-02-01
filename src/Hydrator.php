@@ -302,6 +302,11 @@ class Hydrator implements HydratorInterface
      */
     public function hydrateSet(string $className, array $data): array
     {
+        $outermost = false;
+        if ($this->isHydratingSet === false) {
+            $this->isHydratingSet = true;
+            $outermost = true;
+        }
         $event = new PreHydrateSetEvent($className, $data);
         $this->dispatcher->dispatch($event);
         $data = $event->getHydrateData();
@@ -315,6 +320,10 @@ class Hydrator implements HydratorInterface
 
         $event = new PostHydrateSetEvent($className, $data, $items);
         $this->dispatcher->dispatch($event);
+        if ($outermost) {
+            $this->doPendingCacheLookups();
+            $this->isHydratingSet = false;
+        }
         /** @var array<T> $result */
         $result = $event->getResult();
         return $result;
