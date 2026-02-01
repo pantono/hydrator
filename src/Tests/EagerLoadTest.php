@@ -73,6 +73,12 @@ class EagerLoadTest extends TestCase
             }
             return null;
         });
+        $locator->expects($this->any())->method('getClassAutoWire')->willReturnCallback(function ($item) use ($hydrator) {
+            if ($item === 'Pantono\Hydrator\Hydrator') {
+                return $hydrator;
+            }
+            return null;
+        });
         StaticLocator::setLocator($locator);
         $this->container->expects($this->once())->method('getLocator')->willReturn($locator);
         $output = $hydrator->hydrateSet(OneToManyObject::class, [['id' => 1]]);
@@ -114,9 +120,12 @@ class EagerLoadTest extends TestCase
         $repo = $this->getMockBuilder(EagerLoadRepository::class)->disableOriginalConstructor()->getMock();
         $locator = $this->getMockBuilder(LocatorInterface::class)->getMock();
         StaticLocator::setLocator($locator);
-        $locator->expects($this->any())->method('loadDependency')->willReturnOnConsecutiveCalls(
-            $repo, $hydrator
-        );
+        $locator->expects($this->any())->method('loadDependency')->willReturnCallback(function ($dep) use ($repo) {
+            return $repo;
+        });
+        $locator->expects($this->any())->method('getClassAutoWire')->willReturnCallback(function ($item) use ($hydrator) {
+            return $hydrator;
+        });
         $this->container->expects($this->once())->method('getLocator')->willReturn($locator);
         return $repo;
     }

@@ -171,7 +171,7 @@ METHOD_BODY;
 /**
 * @var \Pantono\Hydrator\Hydrator \$hydrator
 */
-\$hydrator = \$this->getLocator()->loadDependency(\Pantono\Hydrator\Hydrator::class);
+\$hydrator = \$this->getLocator()->getClassAutoWire(\Pantono\Hydrator\Hydrator::class);
 if (!\$cachedValue) {
     \$value = \$hydrator->lookupRecord(\\$model::class, $lookupValue); 
 } else {
@@ -203,7 +203,7 @@ EAGER;
 /**
 * @var \Pantono\Hydrator\Hydrator \$hydrator
 */
-\$hydrator = \$this->getLocator()->loadDependency(\Pantono\Hydrator\Hydrator::class);
+\$hydrator = \$this->getLocator()->getClassAutoWire(\Pantono\Hydrator\Hydrator::class);
 \$value = [];
 if (\$cachedValue !== null) {
     \$value = \$hydrator->hydrateSet(\\$model::class, \$cachedValue);
