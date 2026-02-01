@@ -15,6 +15,7 @@ use Pantono\Contracts\Locator\LocatorInterface;
 use Pantono\Hydrator\Locator\StaticLocator;
 use Pantono\Hydrator\Tests\MockObjects\LazyLoadModelCollection;
 use Pantono\Hydrator\Tests\MockServices\MockLookupService;
+use Pantono\Hydrator\Tests\MockObjects\OneToManyObject;
 
 class EagerLoadTest extends TestCase
 {
@@ -46,6 +47,36 @@ class EagerLoadTest extends TestCase
         $output = $hydrator->hydrateSet(EagerLoadModel::class, [['id' => 1, 'lookup_model' => 1]]);
         $this->assertInstanceOf(EagerLoadModel::class, $output[0]);
         $this->assertEquals($lookup, $output[0]->getLookupModel());
+    }
+
+    public function testEagerLoadOneToMany()
+    {
+        $hydrator = $this->getHydrator();
+        $locator = $this->getMockBuilder(LocatorInterface::class)->getMock();
+        $repo = $this->getMockBuilder(EagerLoadRepository::class)->disableOriginalConstructor()->getMock();
+        $repo->expects($this->any())->method('getDataIn')->willReturn([
+            ['id' => 1, 'other_id' => 1],
+            ['id' => 2, 'other_id' => 1],
+            ['id' => 3, 'other_id' => 1],
+            ['id' => 4, 'other_id' => 1],
+            ['id' => 5, 'other_id' => 1],
+            ['id' => 6, 'other_id' => 1],
+            ['id' => 8, 'other_id' => 2],
+            ['id' => 9, 'other_id' => 2],
+        ]);
+        $locator->expects($this->any())->method('loadDependency')->willReturnCallback(function ($item) use ($repo, $hydrator) {
+            if ($item === ':' . EagerLoadRepository::class) {
+                return $repo;
+            }
+            if ($item === Hydrator::class) {
+                return $hydrator;
+            }
+            return null;
+        });
+        StaticLocator::setLocator($locator);
+        $this->container->expects($this->once())->method('getLocator')->willReturn($locator);
+        $output = $hydrator->hydrateSet(OneToManyObject::class, [['id' => 1]]);
+        $this->assertCount(6, $output[0]->getData());
     }
 
     public function testEagerLoadCollection()

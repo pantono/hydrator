@@ -47,12 +47,17 @@ class ProxyGenerator
             $oneToOne = $property->getOneToOne();
             $proxyMethod = false;
             $proxySingleCachedLookup = false;
+            $proxyOneToManyCachedLookup = false;
             if ($oneToOne) {
                 if (class_exists($oneToOne)) {
                     $proxySingleCachedLookup = true;
                 }
             } elseif ($targetType && class_exists($targetType)) {
                 $proxySingleCachedLookup = true;
+            }
+            $oneToMany = $property->getOneToManyModel();
+            if ($oneToMany) {
+                $proxyOneToManyCachedLookup = true;
             }
             if ($property->isLazy() === true && $methodName !== null && $fieldName) {
                 $proxyMethod = true;
@@ -65,6 +70,9 @@ class ProxyGenerator
             }
             if ($proxySingleCachedLookup && !$methodBody) {
                 $methodBody = $this->singleCachedLookupMethod($property);
+            }
+            if ($proxyOneToManyCachedLookup && !$methodBody) {
+                $methodBody = $this->oneToManyCachedLookupMethod($property, $pantonoReflection);
             }
             if ($methodBody) {
                 $getterMethod = $this->cloneMethod($reflection->getMethod($getter), $class, $namespace);
@@ -163,11 +171,42 @@ METHOD_BODY;
 /**
 * @var \Pantono\Hydrator\Hydrator \$hydrator
 */
-\$hydrator = \$this->getLocator()->loadDependency('Hydrator');
+\$hydrator = \$this->getLocator()->loadDependency(\Pantono\Hydrator\Hydrator::class);
 if (!\$cachedValue) {
     \$value = \$hydrator->lookupRecord(\\$model::class, $lookupValue); 
 } else {
     \$value = \$hydrator->hydrate(\\$model::class, \$cachedValue);
+}
+\$this->completedLookups['$getter'] = true;
+parent::{$setter}(\$value);
+return \$value;
+EAGER;
+    }
+
+    /**
+     * @param PantonoReflectionProperty $property
+     * @param PantonoReflectionModel<object> $parentReflection
+     * @return string
+     */
+    private function oneToManyCachedLookupMethod(PantonoReflectionProperty $property, PantonoReflectionModel $parentReflection): string
+    {
+        $setter = $property->getSetter();
+        $getter = $property->getGetter();
+        $model = $property->getOneToManyModel();
+        $mappedBy = $property->getOneToManyMappedBy();
+        $idColumn = $parentReflection->getDatabaseIdColumn();
+        $lookupValue = "\$this->hydratorParams['$idColumn']";
+
+        return <<<EAGER
+\$key = \Pantono\Utilities\CacheHelper::cleanCacheKey('{$model}__' . '$mappedBy' . '__' . $lookupValue);
+\$cachedValue = EphemeralCacheHelper::get(\$key);
+/**
+* @var \Pantono\Hydrator\Hydrator \$hydrator
+*/
+\$hydrator = \$this->getLocator()->loadDependency(\Pantono\Hydrator\Hydrator::class);
+\$value = [];
+if (\$cachedValue !== null) {
+    \$value = \$hydrator->hydrateSet(\\$model::class, \$cachedValue);
 }
 \$this->completedLookups['$getter'] = true;
 parent::{$setter}(\$value);

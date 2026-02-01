@@ -26,9 +26,14 @@ class Hydrator implements HydratorInterface
     private EventDispatcherInterface $dispatcher;
     private ?ApplicationCacheInterface $cache;
     /**
-     * @var array<class-string,array<int|string>>
+     * @var array<class-string, array<int|string>>
      */
     private array $pendingModelLookups = [];
+    /**
+     * @var array<class-string, array<string, array<int|string>>>
+     */
+    private array $pendingOneToManyLookups = [];
+    private bool $isHydratingSet = false;
 
     public function __construct(ContainerInterface $container, EventDispatcherInterface $dispatcher, ?ApplicationCacheInterface $cache = null)
     {
@@ -124,7 +129,7 @@ class Hydrator implements HydratorInterface
              * @var int|string|null $data
              */
             $data = $hydrateData[$field] ?? null;
-            if ($data !== null || $field === '$this') {
+            if ($data !== null || $field === '$this' || $property->getOneToManyModel()) {
                 if ($property->isLazy() === true) {
                     continue;
                 }
@@ -226,6 +231,14 @@ class Hydrator implements HydratorInterface
                                 $this->addDatabaseLookup($targetType, $data);
                             }
                         }
+                        $oneToMany = $property->getOneToManyModel();
+                        if ($oneToMany && $isEagerLoad) {
+                            $mappedBy = $property->getOneToManyMappedBy();
+                            $idColumn = $pantonoReflection->getDatabaseIdColumn();
+                            if ($idColumn && isset($hydrateData[$idColumn]) && $mappedBy) {
+                                $this->addOneToManyLookup($oneToMany, $mappedBy, $hydrateData[$idColumn]);
+                            }
+                        }
                         $data = null;
                     }
                 }
@@ -289,6 +302,11 @@ class Hydrator implements HydratorInterface
      */
     public function hydrateSet(string $className, array $data): array
     {
+        $outermost = false;
+        if ($this->isHydratingSet === false) {
+            $this->isHydratingSet = true;
+            $outermost = true;
+        }
         $event = new PreHydrateSetEvent($className, $data);
         $this->dispatcher->dispatch($event);
         $data = $event->getHydrateData();
@@ -302,7 +320,10 @@ class Hydrator implements HydratorInterface
 
         $event = new PostHydrateSetEvent($className, $data, $items);
         $this->dispatcher->dispatch($event);
-        $this->doPendingCacheLookups();
+        if ($outermost) {
+            $this->doPendingCacheLookups();
+            $this->isHydratingSet = false;
+        }
         /** @var array<T> $result */
         $result = $event->getResult();
         return $result;
@@ -383,9 +404,21 @@ class Hydrator implements HydratorInterface
         $this->pendingModelLookups[$className][] = $id;
     }
 
+    private function addOneToManyLookup(string $className, string $mappedBy, string|int $id): void
+    {
+        /** @var class-string $className */
+        if (!isset($this->pendingOneToManyLookups[$className])) {
+            $this->pendingOneToManyLookups[$className] = [];
+        }
+        if (!isset($this->pendingOneToManyLookups[$className][$mappedBy])) {
+            $this->pendingOneToManyLookups[$className][$mappedBy] = [];
+        }
+        $this->pendingOneToManyLookups[$className][$mappedBy][] = $id;
+    }
+
     private function doPendingCacheLookups(): void
     {
-        if (empty($this->pendingModelLookups)) {
+        if (empty($this->pendingModelLookups) && empty($this->pendingOneToManyLookups)) {
             return;
         }
         $repo = $this->getRepository();
@@ -393,14 +426,36 @@ class Hydrator implements HydratorInterface
             $pantonoReflection = new PantonoReflectionModel($model);
             $idColumn = $pantonoReflection->getDatabaseIdColumn();
             if (!$idColumn) {
-                return;
+                continue;
             }
             $output = $repo->lookupRecords($model, $ids);
+            /** @var array<string, mixed> $row */
             foreach ($output as $row) {
-                $key = CacheHelper::cleanCacheKey($model . '__' . $row[$idColumn]);
-                EphemeralCacheHelper::setItem($key, $row);
+                if (isset($row[$idColumn])) {
+                    $key = CacheHelper::cleanCacheKey($model . '__' . $row[$idColumn]);
+                    EphemeralCacheHelper::setItem($key, $row);
+                }
             }
             unset($this->pendingModelLookups[$model]);
+        }
+        foreach ($this->pendingOneToManyLookups as $model => $lookups) {
+            foreach ($lookups as $mappedBy => $ids) {
+                $pantonoReflection = new PantonoReflectionModel($model);
+                $table = $pantonoReflection->getDatabaseTable();
+                if (!$table) {
+                    continue;
+                }
+                $output = $repo->getDataIn($table, $mappedBy, $ids);
+                $results = [];
+                foreach ($output as $row) {
+                    $results[$row[$mappedBy]][] = $row;
+                }
+                foreach ($ids as $id) {
+                    $key = CacheHelper::cleanCacheKey($model . '__' . $mappedBy . '__' . $id);
+                    EphemeralCacheHelper::setItem($key, $results[$id] ?? []);
+                }
+            }
+            unset($this->pendingOneToManyLookups[$model]);
         }
     }
 
