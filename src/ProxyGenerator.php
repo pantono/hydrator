@@ -166,12 +166,13 @@ METHOD_BODY;
         $lookupValue = "\$this->hydratorParams['$fieldName']";
         $model = $property->getType();
         return <<<EAGER
+\$hydrator = \$this->getLocator()->getClassAutoWire(\Pantono\Hydrator\Hydrator::class);
+\$hydrator->doPendingCacheLookups();
 \$key = \Pantono\Utilities\CacheHelper::cleanCacheKey('{$model}__' . $lookupValue);
 \$cachedValue = EphemeralCacheHelper::get(\$key);
 /**
 * @var \Pantono\Hydrator\Hydrator \$hydrator
 */
-\$hydrator = \$this->getLocator()->getClassAutoWire(\Pantono\Hydrator\Hydrator::class);
 if (!\$cachedValue) {
     \$value = \$hydrator->lookupRecord(\\$model::class, $lookupValue); 
 } else {
@@ -198,12 +199,13 @@ EAGER;
         $lookupValue = "\$this->hydratorParams['$idColumn']";
 
         return <<<EAGER
+\$hydrator = \$this->getLocator()->getClassAutoWire(\Pantono\Hydrator\Hydrator::class);
+\$hydrator->doPendingCacheLookups();
 \$key = \Pantono\Utilities\CacheHelper::cleanCacheKey('{$model}__' . '$mappedBy' . '__' . $lookupValue);
 \$cachedValue = EphemeralCacheHelper::get(\$key);
 /**
 * @var \Pantono\Hydrator\Hydrator \$hydrator
 */
-\$hydrator = \$this->getLocator()->getClassAutoWire(\Pantono\Hydrator\Hydrator::class);
 \$value = [];
 if (\$cachedValue !== null) {
     \$value = \$hydrator->hydrateSet(\\$model::class, \$cachedValue);
