@@ -166,7 +166,7 @@ METHOD_BODY;
         $lookupValue = "\$this->hydratorParams['$fieldName']";
         $model = $property->getType();
         return <<<EAGER
-\$hydrator = \$this->getLocator()->getClassAutoWire(\Pantono\Hydrator\Hydrator::class);
+\$hydrator = \$this->getLocator()->loadDependency('@Hydrator');
 \$hydrator->doPendingCacheLookups();
 \$key = \Pantono\Utilities\CacheHelper::cleanCacheKey('{$model}__' . $lookupValue);
 \$cachedValue = EphemeralCacheHelper::get(\$key);
@@ -199,7 +199,7 @@ EAGER;
         $lookupValue = "\$this->hydratorParams['$idColumn']";
 
         return <<<EAGER
-\$hydrator = \$this->getLocator()->getClassAutoWire(\Pantono\Hydrator\Hydrator::class);
+\$hydrator = \$this->getLocator()->loadDependency('@Hydrator');
 \$hydrator->doPendingCacheLookups();
 \$key = \Pantono\Utilities\CacheHelper::cleanCacheKey('{$model}__' . '$mappedBy' . '__' . $lookupValue);
 \$cachedValue = EphemeralCacheHelper::get(\$key);

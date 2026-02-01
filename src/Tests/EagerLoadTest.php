@@ -68,7 +68,7 @@ class EagerLoadTest extends TestCase
             if ($item === ':' . EagerLoadRepository::class) {
                 return $repo;
             }
-            if ($item === Hydrator::class) {
+            if ($item === Hydrator::class || $item === '@Hydrator') {
                 return $hydrator;
             }
             return null;
@@ -120,7 +120,10 @@ class EagerLoadTest extends TestCase
         $repo = $this->getMockBuilder(EagerLoadRepository::class)->disableOriginalConstructor()->getMock();
         $locator = $this->getMockBuilder(LocatorInterface::class)->getMock();
         StaticLocator::setLocator($locator);
-        $locator->expects($this->any())->method('loadDependency')->willReturnCallback(function ($dep) use ($repo) {
+        $locator->expects($this->any())->method('loadDependency')->willReturnCallback(function ($dep) use ($repo, $hydrator) {
+            if ($dep === '@Hydrator') {
+                return $hydrator;
+            }
             return $repo;
         });
         $locator->expects($this->any())->method('getClassAutoWire')->willReturnCallback(function ($item) use ($hydrator) {
