@@ -3,6 +3,7 @@
 namespace Pantono\Hydrator\Tests\MockObjects;
 
 use DateTimeInterface;
+use Pantono\Contracts\Attributes\EagerLoad;
 
 class DateTimeModel
 {

@@ -15,6 +15,7 @@ use Pantono\Hydrator\Tests\MockObjects\BoolModel;
 use Pantono\Contracts\Container\ContainerInterface;
 use Pantono\Contracts\Application\Cache\ApplicationCacheInterface;
 use Symfony\Component\EventDispatcher\EventDispatcher;
+use Pantono\Hydrator\Tests\MockObjects\DateTimeEagerModel;
 
 class HydratorTest extends TestCase
 {
@@ -24,6 +25,9 @@ class HydratorTest extends TestCase
 
     public function setUp(): void
     {
+        if (!defined('APPLICATION_PATH')) {
+            define('APPLICATION_PATH', __DIR__ . '/../../');
+        }
         $this->container = $this->getMockBuilder(ContainerInterface::class)->getMock();
         $this->cache = $this->getMockBuilder(ApplicationCacheInterface::class)->getMock();
         $this->eventDispatcher = $this->getMockBuilder(EventDispatcher::class)->getMock();
@@ -55,6 +59,22 @@ class HydratorTest extends TestCase
             )
         );
         $this->assertInstanceOf(\DateTime::class, $expected->getDate());
+    }
+
+    public function testDateTimeEagerHydrator()
+    {
+        $expected = new DateTimeEagerModel();
+        $expected->setDate(new \DateTimeImmutable('2021-01-01 00:00:00'));
+
+        $result = $this->getHydrator()->hydrate(
+            DateTimeEagerModel::class,
+            ['date' => '2021-01-01 00:00:00']
+        )->getDate();
+        $this->assertEquals(
+            $expected->getDate()->format('Y-m-d H:i:s'),
+            $result->format('Y-m-d H:i:s')
+        );
+        $this->assertInstanceOf(\DateTimeImmutable::class, $result);
     }
 
     public function testFloatHydrate(): void

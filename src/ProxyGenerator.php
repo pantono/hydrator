@@ -52,7 +52,7 @@ class ProxyGenerator
                 if (class_exists($oneToOne)) {
                     $proxySingleCachedLookup = true;
                 }
-            } elseif ($targetType && class_exists($targetType)) {
+            } elseif ($targetType && class_exists($targetType) && !$property->isDateType()) {
                 $proxySingleCachedLookup = true;
             }
             $oneToMany = $property->getOneToManyModel();
