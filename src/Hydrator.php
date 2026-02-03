@@ -30,6 +30,10 @@ class Hydrator implements HydratorInterface
      */
     private array $pendingModelLookups = [];
     /**
+     * @var array<class-string, array<int|string>>
+     */
+    private array $completedCacheLookups = [];
+    /**
      * @var array<class-string, array<string, array<int|string>>>
      */
     private array $pendingOneToManyLookups = [];
@@ -426,6 +430,7 @@ class Hydrator implements HydratorInterface
             $pantonoReflection = new PantonoReflectionModel($model);
             $idColumn = $pantonoReflection->getDatabaseIdColumn();
             if (!$idColumn) {
+                unset($this->pendingModelLookups[$model]);
                 continue;
             }
             $oneToOne = [];
