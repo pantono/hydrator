@@ -167,7 +167,6 @@ METHOD_BODY;
         $model = $property->getType();
         return <<<EAGER
 \$hydrator = \$this->getLocator()->loadDependency('@Hydrator');
-\$hydrator->doPendingCacheLookups();
 \$key = \Pantono\Utilities\CacheHelper::cleanCacheKey('{$model}__' . $lookupValue);
 \$cachedValue = EphemeralCacheHelper::get(\$key);
 /**
@@ -200,7 +199,6 @@ EAGER;
 
         return <<<EAGER
 \$hydrator = \$this->getLocator()->loadDependency('@Hydrator');
-\$hydrator->doPendingCacheLookups();
 \$key = \Pantono\Utilities\CacheHelper::cleanCacheKey('{$model}__' . '$mappedBy' . '__' . $lookupValue);
 \$cachedValue = EphemeralCacheHelper::get(\$key);
 /**
