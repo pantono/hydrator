@@ -428,9 +428,20 @@ class Hydrator implements HydratorInterface
             if (!$idColumn) {
                 continue;
             }
+            $oneToOne = [];
+            foreach ($pantonoReflection->getProperties() as $property) {
+                if ($property->getOneToOne()) {
+                    $oneToOne[$property->getFieldName()] = $property->getOneToOne();
+                }
+            }
             $output = $repo->lookupRecords($model, $ids);
             /** @var array<string, mixed> $row */
             foreach ($output as $row) {
+                foreach ($row as $column => $value) {
+                    if (isset($oneToOne[$column])) {
+                        $this->addDatabaseLookup($oneToOne[$column], $value);
+                    }
+                }
                 if (isset($row[$idColumn])) {
                     $key = CacheHelper::cleanCacheKey($model . '__' . $row[$idColumn]);
                     EphemeralCacheHelper::setItem($key, $row);
@@ -457,6 +468,7 @@ class Hydrator implements HydratorInterface
             }
             unset($this->pendingOneToManyLookups[$model]);
         }
+        $this->doPendingCacheLookups();
     }
 
     private function getRepository(): EagerLoadRepository

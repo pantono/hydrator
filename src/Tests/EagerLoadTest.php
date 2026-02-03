@@ -16,6 +16,9 @@ use Pantono\Hydrator\Locator\StaticLocator;
 use Pantono\Hydrator\Tests\MockObjects\LazyLoadModelCollection;
 use Pantono\Hydrator\Tests\MockServices\MockLookupService;
 use Pantono\Hydrator\Tests\MockObjects\OneToManyObject;
+use Pantono\Hydrator\Tests\MockObjects\DeepEagerLoadTopLevel;
+use Pantono\Hydrator\Tests\MockObjects\DeepEagerLoadFirstLevel;
+use Pantono\Hydrator\Tests\MockObjects\DeepEagerLoadSecondLevel;
 
 class EagerLoadTest extends TestCase
 {
@@ -115,6 +118,29 @@ class EagerLoadTest extends TestCase
         $this->assertEquals($lookup, $output[0]->getLookupModel());
     }
 
+    public function testEagerLoadMultipleLevels()
+    {
+        $hydrator = $this->getHydrator();
+        $repo = $this->trainContainerToReturnRepository($hydrator);
+        $repo->expects($this->any())->method('lookupRecords')
+            ->willReturnCallback(function (string $input, array $ids) {
+                if ($input === 'Pantono\Hydrator\Tests\MockObjects\DeepEagerLoadFirstLevel') {
+                    return [['id' => 1, 'second' => 2]];
+                }
+                if ($input === 'Pantono\Hydrator\Tests\MockObjects\DeepEagerLoadSecondLevel') {
+                    return [['id' => 2, 'output' => 'string']];
+                }
+            });
+        $expected = new DeepEagerLoadTopLevel();
+        $first = new DeepEagerLoadFirstLevel();
+        $second = new DeepEagerLoadSecondLevel();
+        $second->setOutput('string');
+        $first->setSecond($second);
+        $expected->setModel($first);
+        $output = $this->getHydrator()->hydrateSet(DeepEagerLoadTopLevel::class, [['id' => 1, 'model' => 1]]);
+        $this->assertEquals($second->getOutput(), $output[0]->getModel()->getSecond()->getOutput());
+    }
+
     private function trainContainerToReturnRepository(Hydrator $hydrator): MockObject|EagerLoadRepository
     {
         $repo = $this->getMockBuilder(EagerLoadRepository::class)->disableOriginalConstructor()->getMock();
@@ -129,7 +155,7 @@ class EagerLoadTest extends TestCase
         $locator->expects($this->any())->method('getClassAutoWire')->willReturnCallback(function ($item) use ($hydrator) {
             return $hydrator;
         });
-        $this->container->expects($this->once())->method('getLocator')->willReturn($locator);
+        $this->container->expects($this->any())->method('getLocator')->willReturn($locator);
         return $repo;
     }
 
