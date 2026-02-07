@@ -88,6 +88,41 @@ class EagerLoadTest extends TestCase
         $this->assertCount(6, $output[0]->getData());
     }
 
+
+    public function testEagerLoadOneToManySingleModel()
+    {
+        $hydrator = $this->getHydrator();
+        $locator = $this->getMockBuilder(LocatorInterface::class)->getMock();
+        $repo = $this->getMockBuilder(EagerLoadRepository::class)->disableOriginalConstructor()->getMock();
+        $repo->expects($this->any())->method('getDataIn')->willReturn([
+            ['id' => 1, 'other_id' => 1],
+            ['id' => 2, 'other_id' => 1],
+            ['id' => 3, 'other_id' => 1],
+            ['id' => 4, 'other_id' => 1],
+            ['id' => 5, 'other_id' => 1],
+            ['id' => 6, 'other_id' => 1]
+        ]);
+        $locator->expects($this->any())->method('loadDependency')->willReturnCallback(function ($item) use ($repo, $hydrator) {
+            if ($item === ':' . EagerLoadRepository::class) {
+                return $repo;
+            }
+            if ($item === Hydrator::class || $item === '@Hydrator') {
+                return $hydrator;
+            }
+            return null;
+        });
+        $locator->expects($this->any())->method('getClassAutoWire')->willReturnCallback(function ($item) use ($hydrator) {
+            if ($item === 'Pantono\Hydrator\Hydrator') {
+                return $hydrator;
+            }
+            return null;
+        });
+        StaticLocator::setLocator($locator);
+        $this->container->expects($this->any())->method('getLocator')->willReturn($locator);
+        $output = $hydrator->hydrate(OneToManyObject::class, ['id' => 1]);
+        $this->assertCount(6, $output->getData());
+    }
+
     public function testEagerLoadCollection()
     {
         $hydrator = $this->getHydrator();

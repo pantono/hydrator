@@ -257,6 +257,41 @@ class Hydrator implements HydratorInterface
     }
 
     /**
+     * @template T of object
+     * @param class-string<T> $className
+     * @param array<int,array<string,mixed>> $data
+     * @return array<T>
+     */
+    public function hydrateSet(string $className, array $data): array
+    {
+        $outermost = false;
+        if ($this->isHydratingSet === false) {
+            $this->isHydratingSet = true;
+            $outermost = true;
+        }
+        $event = new PreHydrateSetEvent($className, $data);
+        $this->dispatcher->dispatch($event);
+        $data = $event->getHydrateData();
+        $items = [];
+        foreach ($data as $item) {
+            $hydrated = $this->hydrate($className, $item);
+            if ($hydrated !== null) {
+                $items[] = $hydrated;
+            }
+        }
+
+        $event = new PostHydrateSetEvent($className, $data, $items);
+        $this->dispatcher->dispatch($event);
+        if ($outermost) {
+            $this->doPendingCacheLookups();
+            $this->isHydratingSet = false;
+        }
+        /** @var array<T> $result */
+        $result = $event->getResult();
+        return $result;
+    }
+
+    /**
      * @param class-string $className
      * @param mixed $field
      * @return mixed
@@ -306,40 +341,21 @@ class Hydrator implements HydratorInterface
         return null;
     }
 
-
     /**
      * @template T of object
-     * @param class-string<T> $className
-     * @param array<int,array<string,mixed>> $data
+     * @param class-string<T> $model
+     * @param string $column
+     * @param int|string $fieldValue
      * @return array<T>
      */
-    public function hydrateSet(string $className, array $data): array
+    public function lookupRecords(string $model, string $column, int|string $fieldValue): array
     {
-        $outermost = false;
-        if ($this->isHydratingSet === false) {
-            $this->isHydratingSet = true;
-            $outermost = true;
+        $reflection = new PantonoReflectionModel($model);
+        $table = $reflection->getDatabaseTable();
+        if (!$table) {
+            throw new \RuntimeException('Database table not set for ' . $model);
         }
-        $event = new PreHydrateSetEvent($className, $data);
-        $this->dispatcher->dispatch($event);
-        $data = $event->getHydrateData();
-        $items = [];
-        foreach ($data as $item) {
-            $hydrated = $this->hydrate($className, $item);
-            if ($hydrated !== null) {
-                $items[] = $hydrated;
-            }
-        }
-
-        $event = new PostHydrateSetEvent($className, $data, $items);
-        $this->dispatcher->dispatch($event);
-        if ($outermost) {
-            $this->doPendingCacheLookups();
-            $this->isHydratingSet = false;
-        }
-        /** @var array<T> $result */
-        $result = $event->getResult();
-        return $result;
+        return $this->hydrateSet($model, $this->getRepository()->getDataIn($table, $column, [$fieldValue]));
     }
 
     /**

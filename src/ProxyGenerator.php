@@ -211,6 +211,8 @@ EAGER;
 \$value = [];
 if (\$cachedValue !== null) {
     \$value = \$hydrator->hydrateSet(\\$model::class, \$cachedValue);
+} else {
+    \$value = \$hydrator->lookupRecords(\\$model::class, '$mappedBy', $lookupValue);
 }
 \$this->completedLookups['$getter'] = true;
 parent::{$setter}(\$value);

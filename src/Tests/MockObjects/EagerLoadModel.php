@@ -3,7 +3,7 @@
 namespace Pantono\Hydrator\Tests\MockObjects;
 
 use Pantono\Contracts\Attributes\EagerLoad;
-use Pantono\Database\Attributes\OneToOne;
+use Pantono\Contracts\Attributes\Database\OneToOne;
 
 #[EagerLoad]
 class EagerLoadModel
