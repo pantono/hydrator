@@ -53,7 +53,11 @@ class ProxyGenerator
                     $proxySingleCachedLookup = true;
                 }
             } elseif ($targetType && class_exists($targetType) && !$property->isDateType()) {
-                $proxySingleCachedLookup = true;
+                $targetReflection = new PantonoReflectionModel($targetType);
+                if ($targetReflection->getDatabaseTable() || $targetReflection->getLocator()) {
+                    $proxySingleCachedLookup = true;
+                }
+
             }
             $oneToMany = $property->getOneToManyModel();
             if ($oneToMany) {
