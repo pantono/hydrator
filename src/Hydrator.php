@@ -469,6 +469,9 @@ class Hydrator implements HydratorInterface
             /** @var array<string, int|string> $row */
             foreach ($output as $row) {
                 foreach ($row as $column => $value) {
+                    if ($value === null) {
+                        continue;
+                    }
                     if (isset($oneToOne[$column])) {
                         /**
                          * @var class-string $lookupModel
