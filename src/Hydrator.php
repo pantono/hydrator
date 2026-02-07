@@ -8,7 +8,6 @@ use Pantono\Utilities\DateTimeParser;
 use Pantono\Utilities\ApplicationHelper;
 use Pantono\Contracts\Container\ContainerInterface;
 use Pantono\Contracts\Hydrator\HydratorInterface;
-use Pantono\Contracts\Attributes\Locator;
 use Pantono\Contracts\Application\Cache\ApplicationCacheInterface;
 use Pantono\Utilities\CacheHelper;
 use Pantono\Hydrator\Event\PreHydrateEvent;
@@ -29,10 +28,6 @@ class Hydrator implements HydratorInterface
      * @var array<class-string, array<int|string>>
      */
     private array $pendingModelLookups = [];
-    /**
-     * @var array<class-string, array<int|string>>
-     */
-    private array $completedCacheLookups = [];
     /**
      * @var array<class-string, array<string, array<int|string>>>
      */
@@ -261,6 +256,11 @@ class Hydrator implements HydratorInterface
         return $result;
     }
 
+    /**
+     * @param class-string $className
+     * @param mixed $field
+     * @return mixed
+     */
     public function lookupRecord(string $className, mixed $field): mixed
     {
         if (!$field) {
@@ -276,25 +276,34 @@ class Hydrator implements HydratorInterface
                 return $this->hydrate($className, $value);
             }
         }
-        $class = new \ReflectionClass($className);
-        $attributes = $class->getAttributes(Locator::class);
-        if (empty($attributes)) {
-            return null;
-        }
-        $args = $attributes[0]->getArguments();
-        $service = $args['serviceName'] ?? null;
-        $methodName = $args['methodName'] ?? null;
-        $className = $args['className'] ?? null;
-        if ($className) {
-            $dep = $this->container->getLocator()->getClassAutoWire($className);
-        } else {
-            $dep = $this->container->getLocator()->loadDependency($service);
-        }
-        if (!$dep) {
-            throw new \RuntimeException('Unable to load dependency ' . ($service ?: $className) . '::' . $methodName);
+        $reflection = new PantonoReflectionModel($className);
+        if ($reflection->getLocator()) {
+            $args = $reflection->getLocator();
+            $service = $args['serviceName'] ?? null;
+            $methodName = $args['methodName'] ?? null;
+            $className = $args['className'] ?? null;
+            if ($className) {
+                $dep = $this->container->getLocator()->getClassAutoWire($className);
+            } else {
+                $dep = $this->container->getLocator()->loadDependency($service);
+            }
+            if (!$dep) {
+                throw new \RuntimeException('Unable to load dependency ' . ($service ?: $className) . '::' . $methodName);
+            }
+
+            return $dep->$methodName($field);
         }
 
-        return $dep->$methodName($field);
+        if ($reflection->getDatabaseTable() && $reflection->getDatabaseIdColumn()) {
+            if (!is_string($field) && !is_int($field)) {
+                return null;
+            }
+            $row = $this->getRepository()->selectSingleRow($reflection->getDatabaseTable(), $reflection->getDatabaseIdColumn(), $field);
+            if ($row) {
+                return $this->hydrate($className, $row);
+            }
+        }
+        return null;
     }
 
 
@@ -433,6 +442,7 @@ class Hydrator implements HydratorInterface
                 unset($this->pendingModelLookups[$model]);
                 continue;
             }
+            /** @var array<string, class-string> $oneToOne */
             $oneToOne = [];
             foreach ($pantonoReflection->getProperties() as $property) {
                 if ($property->getOneToOne()) {
@@ -440,11 +450,15 @@ class Hydrator implements HydratorInterface
                 }
             }
             $output = $repo->lookupRecords($model, $ids);
-            /** @var array<string, mixed> $row */
+            /** @var array<string, int|string> $row */
             foreach ($output as $row) {
                 foreach ($row as $column => $value) {
                     if (isset($oneToOne[$column])) {
-                        $this->addDatabaseLookup($oneToOne[$column], $value);
+                        /**
+                         * @var class-string $lookupModel
+                         */
+                        $lookupModel = $oneToOne[$column];
+                        $this->addDatabaseLookup($lookupModel, $value);
                     }
                 }
                 if (isset($row[$idColumn])) {
