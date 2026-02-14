@@ -213,6 +213,9 @@ EAGER;
         $lookupValue = "\$this->hydratorParams['$idColumn']";
 
         return <<<EAGER
+if (\$this->completedLookups['$getter'] === true) {
+    return parent::{$getter}();
+}
 \$hydrator = \$this->getLocator()->loadDependency('@Hydrator');
 \$key = \Pantono\Utilities\CacheHelper::cleanCacheKey('{$model}__' . '$mappedBy' . '__' . $lookupValue);
 \$cachedValue = EphemeralCacheHelper::get(\$key);
