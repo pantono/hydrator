@@ -12,6 +12,7 @@ use Pantono\Hydrator\Traits\LocatorAwareTrait;
 use Pantono\Utilities\Model\PantonoReflectionModel;
 use Pantono\Utilities\Model\PantonoReflectionProperty;
 use Pantono\Utilities\EphemeralCacheHelper;
+use Pantono\Contracts\Attributes\DatabaseTable;
 
 class ProxyGenerator
 {
@@ -21,9 +22,19 @@ class ProxyGenerator
             throw new \RuntimeException('Class ' . $className . ' does not exist');
         }
 
+        $pantonoReflection = new PantonoReflectionModel($className);
+
         $reflection = new \ReflectionClass($className);
         $namespace = new PhpNamespace('Pantono\Proxy');
         $class = $namespace->addClass($reflection->getShortName() . 'ProxyClass');
+        if ($pantonoReflection->getDatabaseTable()) {
+            if ($pantonoReflection->getDatabaseIdColumn()) {
+                $class->addAttribute(DatabaseTable::class, ['table' => $pantonoReflection->getDatabaseTable(), 'idColumn' => $pantonoReflection->getDatabaseIdColumn()]);
+            } else {
+                $class->addAttribute(DatabaseTable::class, ['table' => $pantonoReflection->getDatabaseTable()]);
+            }
+
+        }
         $class->setExtends($className);
         $namespace->addUse(LocatorAwareTrait::class);
         $class->addTrait(LocatorAwareTrait::class);
