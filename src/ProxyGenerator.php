@@ -181,6 +181,9 @@ METHOD_BODY;
         $lookupValue = "\$this->hydratorParams['$fieldName']";
         $model = $property->getType();
         return <<<EAGER
+if (isset(\$this->completedLookups['$getter']) && \$this->completedLookups['$getter'] === true) {
+    return parent::{$getter}();
+}
 \$hydrator = \$this->getLocator()->loadDependency('@Hydrator');
 \$key = \Pantono\Utilities\CacheHelper::cleanCacheKey('{$model}__' . $lookupValue);
 \$cachedValue = EphemeralCacheHelper::get(\$key);
