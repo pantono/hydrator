@@ -213,7 +213,7 @@ EAGER;
         $lookupValue = "\$this->hydratorParams['$idColumn']";
 
         return <<<EAGER
-if (\$this->completedLookups['$getter'] === true) {
+if (isset(\$this->completedLookups['$getter']) && \$this->completedLookups['$getter'] === true) {
     return parent::{$getter}();
 }
 \$hydrator = \$this->getLocator()->loadDependency('@Hydrator');
