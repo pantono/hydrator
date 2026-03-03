@@ -4,6 +4,7 @@ namespace Pantono\Hydrator\Repository;
 
 use Pantono\Database\Repository\DefaultRepository;
 use Pantono\Utilities\Model\PantonoReflectionModel;
+use Doctrine\DBAL\ArrayParameterType;
 
 class EagerLoadRepository extends DefaultRepository
 {
@@ -37,6 +38,22 @@ class EagerLoadRepository extends DefaultRepository
      */
     public function getDataIn(string $tableName, string $columnName, array $ids): array
     {
-        return $this->getDb()->fetchAll($this->getDb()->select()->from($tableName)->where($columnName . ' in (?)', $ids));
+        $select = $this->getDb()->select('t.*')->from($tableName, 't')
+            ->where('t.' . $columnName . ' in (:ids)')
+            ->setParameter('ids', $ids, ArrayParameterType::STRING);
+        return $this->getDb()->fetchAll($select);
+    }
+
+    public function getManyToManyData(string $joinTable, string $tableName, string $joinColumn, string $relatedColumn, array $ids = []): array
+    {
+        if (empty($ids)) {
+            return [];
+        }
+        return $this->getDb()->fetchAll(
+            $this->getDb()->select('t.*')->from($joinTable, 'j')
+                ->innerJoin('j', $tableName, 't', 'j.' . $relatedColumn . ' = t.id')
+                ->where($joinTable . '.' . $joinColumn . ' in (:ids)')
+                ->setParameter('ids', $ids, ArrayParameterType::STRING)
+        );
     }
 }
