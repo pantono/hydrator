@@ -13,6 +13,7 @@ use Pantono\Utilities\Model\PantonoReflectionModel;
 use Pantono\Utilities\Model\PantonoReflectionProperty;
 use Pantono\Utilities\EphemeralCacheHelper;
 use Pantono\Contracts\Attributes\DatabaseTable;
+use Pantono\Contracts\Attributes\Database\ManyToMany as ManyToManyAttribute;
 
 class ProxyGenerator
 {
@@ -46,6 +47,40 @@ class ProxyGenerator
         $class->addProperty('hydratorParams')->setType('array')->setValue([])->setVisibility('private');
         $class->addProperty('completedLookups')->setType('array')->setValue([])->setVisibility('private');
 
+        $getMagic = $class->addMethod('__get');
+        $getMagic->addParameter('name')->setType('string');
+        $getMagic->setBody('
+$getter = \'get\' . ucfirst($name);
+if (method_exists($this, $getter)) {
+    return $this->$getter();
+}
+if (property_exists($this, $name)) {
+    $rp = new \ReflectionProperty(parent::class, $name);
+    try {
+        return $rp->getValue($this);
+    } catch (\Error $e) {
+    }
+}
+return $this->$name;
+');
+
+        $setMagic = $class->addMethod('__set');
+        $setMagic->addParameter('name')->setType('string');
+        $setMagic->addParameter('value');
+        $setMagic->setBody('
+$setter = \'set\' . ucfirst($name);
+if (method_exists($this, $setter)) {
+    $this->$setter($value);
+    return;
+}
+if (property_exists($this, $name)) {
+    $rp = new \ReflectionProperty(parent::class, $name);
+    $rp->setValue($this, $value);
+    return;
+}
+$this->$name = $value;
+');
+
         $getterMethod = $class->addMethod('setHydratorParams');
         $getterMethod->setReturnType('void');
         $getterMethod->addParameter('params')->setType('array');
@@ -59,6 +94,7 @@ class ProxyGenerator
             $proxyMethod = false;
             $proxySingleCachedLookup = false;
             $proxyOneToManyCachedLookup = false;
+            $proxyManyToManyCachedLookup = false;
             if ($oneToOne) {
                 if (class_exists($oneToOne)) {
                     $proxySingleCachedLookup = true;
@@ -74,6 +110,10 @@ class ProxyGenerator
             if ($oneToMany) {
                 $proxyOneToManyCachedLookup = true;
             }
+            $manyToManyConfig = $this->getManyToManyConfig($property);
+            if ($manyToManyConfig) {
+                $proxyManyToManyCachedLookup = true;
+            }
             if ($property->isLazy() === true && $methodName !== null && $fieldName) {
                 $proxyMethod = true;
             }
@@ -88,6 +128,9 @@ class ProxyGenerator
             }
             if ($proxyOneToManyCachedLookup && !$methodBody) {
                 $methodBody = $this->oneToManyCachedLookupMethod($property, $pantonoReflection);
+            }
+            if ($proxyManyToManyCachedLookup && !$methodBody) {
+                $methodBody = $this->manyToManyCachedLookupMethod($property, $pantonoReflection, $manyToManyConfig);
             }
             if ($methodBody) {
                 $getterMethod = $this->cloneMethod($reflection->getMethod($getter), $class, $namespace);
@@ -160,9 +203,8 @@ SETTER_BODY;
         $lookupMethod = $property->getLocatorMethodName();
         return <<<METHOD_BODY
 global \$app;
-\$parentValue = parent::$getter();
 if (isset(\$this->completedLookups['$getter'])) {
-    return \$parentValue;
+    return parent::$getter();
 }
 \$this->completedLookups['$getter'] = true;
 \$value = $lookupValue?\$this->getLocator()->$locatorMethod('$lookupDependency')->$lookupMethod($lookupValue):null;
@@ -184,6 +226,7 @@ METHOD_BODY;
 if (isset(\$this->completedLookups['$getter']) && \$this->completedLookups['$getter'] === true) {
     return parent::{$getter}();
 }
+\$this->completedLookups['$getter'] = true;
 \$hydrator = \$this->getLocator()->loadDependency('@Hydrator');
 \$key = \Pantono\Utilities\CacheHelper::cleanCacheKey('{$model}__' . $lookupValue);
 \$cachedValue = EphemeralCacheHelper::get(\$key);
@@ -195,9 +238,10 @@ if (!\$cachedValue) {
 } else {
     \$value = \$hydrator->hydrate(\\$model::class, \$cachedValue);
 }
-\$this->completedLookups['$getter'] = true;
-parent::{$setter}(\$value);
-return \$value;
+if (\$value) {
+    parent::{$setter}(\$value);
+}
+return parent::{$getter}();
 EAGER;
     }
 
@@ -219,6 +263,7 @@ EAGER;
 if (isset(\$this->completedLookups['$getter']) && \$this->completedLookups['$getter'] === true) {
     return parent::{$getter}();
 }
+\$this->completedLookups['$getter'] = true;
 \$hydrator = \$this->getLocator()->loadDependency('@Hydrator');
 \$key = \Pantono\Utilities\CacheHelper::cleanCacheKey('{$model}__' . '$mappedBy' . '__' . $lookupValue);
 \$cachedValue = EphemeralCacheHelper::get(\$key);
@@ -231,9 +276,80 @@ if (\$cachedValue !== null) {
 } else {
     \$value = \$hydrator->lookupRecords(\\$model::class, '$mappedBy', $lookupValue);
 }
-\$this->completedLookups['$getter'] = true;
 parent::{$setter}(\$value);
-return \$value;
+return parent::{$getter}();
 EAGER;
+    }
+
+    /**
+     * @param PantonoReflectionProperty $property
+     * @param PantonoReflectionModel<object> $parentReflection
+     * @param array{targetModel: class-string, joinTable: string, joinColumn: string, inverseJoinColumn: string} $manyToManyConfig
+     * @return string
+     */
+    private function manyToManyCachedLookupMethod(
+        PantonoReflectionProperty $property,
+        PantonoReflectionModel $parentReflection,
+        array $manyToManyConfig
+    ): string
+    {
+        $setter = $property->getSetter();
+        $getter = $property->getGetter();
+        $model = $manyToManyConfig['targetModel'];
+        $joinTable = $manyToManyConfig['joinTable'];
+        $joinColumn = $manyToManyConfig['joinColumn'];
+        $inverseJoinColumn = $manyToManyConfig['inverseJoinColumn'];
+        $idColumn = $parentReflection->getDatabaseIdColumn();
+        $lookupValue = "\$this->hydratorParams['$idColumn']";
+
+        return <<<EAGER
+if (isset(\$this->completedLookups['$getter']) && \$this->completedLookups['$getter'] === true) {
+    return parent::{$getter}();
+}
+\$this->completedLookups['$getter'] = true;
+\$hydrator = \$this->getLocator()->loadDependency('@Hydrator');
+\$key = \Pantono\Utilities\CacheHelper::cleanCacheKey('{$model}__' . '$joinTable' . '__' . '$joinColumn' . '__' . '$inverseJoinColumn' . '__' . $lookupValue);
+\$cachedValue = EphemeralCacheHelper::get(\$key);
+/**
+* @var \Pantono\Hydrator\Hydrator \$hydrator
+*/
+\$value = [];
+if (\$cachedValue !== null) {
+    \$value = \$hydrator->hydrateSet(\\$model::class, \$cachedValue);
+} else {
+    \$value = \$hydrator->lookupManyToManyRecords(\\$model::class, '$joinTable', '$joinColumn', '$inverseJoinColumn', $lookupValue);
+}
+parent::{$setter}(\$value);
+return parent::{$getter}();
+EAGER;
+    }
+
+    /**
+     * @param PantonoReflectionProperty $property
+     * @return array{targetModel: class-string, joinTable: string, joinColumn: string, inverseJoinColumn: string}|null
+     */
+    private function getManyToManyConfig(PantonoReflectionProperty $property): ?array
+    {
+        foreach ($property->getReflectionProperty()->getAttributes(ManyToManyAttribute::class) as $attribute) {
+            $args = $attribute->getArguments();
+            $targetModel = $args['targetModel'] ?? $args[3] ?? null;
+            $joinTable = $args['joinTable'] ?? $args[0] ?? null;
+            $joinColumn = $args['joinColumn'] ?? $args[1] ?? null;
+            $inverseJoinColumn = $args['inverseJoinColumn'] ?? $args[2] ?? null;
+            if (
+                is_string($targetModel) &&
+                is_string($joinTable) &&
+                is_string($joinColumn) &&
+                is_string($inverseJoinColumn)
+            ) {
+                return [
+                    'targetModel' => $targetModel,
+                    'joinTable' => $joinTable,
+                    'joinColumn' => $joinColumn,
+                    'inverseJoinColumn' => $inverseJoinColumn,
+                ];
+            }
+        }
+        return null;
     }
 }

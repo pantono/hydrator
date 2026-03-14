@@ -44,15 +44,31 @@ class EagerLoadRepository extends DefaultRepository
         return $this->getDb()->fetchAll($select);
     }
 
-    public function getManyToManyData(string $joinTable, string $tableName, string $joinColumn, string $relatedColumn, array $ids = []): array
+    /**
+     * @param string $joinTable
+     * @param string $tableName
+     * @param string $joinColumn
+     * @param string $relatedColumn
+     * @param string $relatedIdColumn
+     * @param array<int|string> $ids
+     * @return array<int, array<string, mixed>>
+     */
+    public function getManyToManyData(
+        string $joinTable,
+        string $tableName,
+        string $joinColumn,
+        string $relatedColumn,
+        string $relatedIdColumn = 'id',
+        array $ids = []
+    ): array
     {
         if (empty($ids)) {
             return [];
         }
         return $this->getDb()->fetchAll(
-            $this->getDb()->select('t.*')->from($joinTable, 'j')
-                ->innerJoin('j', $tableName, 't', 'j.' . $relatedColumn . ' = t.id')
-                ->where($joinTable . '.' . $joinColumn . ' in (:ids)')
+            $this->getDb()->select('t.*, j.' . $joinColumn . ' as __pantono_join_id')->from($joinTable, 'j')
+                ->innerJoin('j', $tableName, 't', 'j.' . $relatedColumn . ' = t.' . $relatedIdColumn)
+                ->where('j.' . $joinColumn . ' in (:ids)')
                 ->setParameter('ids', $ids, ArrayParameterType::STRING)
         );
     }

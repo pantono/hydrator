@@ -19,6 +19,7 @@ use Pantono\Hydrator\Tests\MockObjects\OneToManyObject;
 use Pantono\Hydrator\Tests\MockObjects\DeepEagerLoadTopLevel;
 use Pantono\Hydrator\Tests\MockObjects\DeepEagerLoadFirstLevel;
 use Pantono\Hydrator\Tests\MockObjects\DeepEagerLoadSecondLevel;
+use Pantono\Hydrator\Tests\MockObjects\ManyToManyObject;
 
 class EagerLoadTest extends TestCase
 {
@@ -121,6 +122,43 @@ class EagerLoadTest extends TestCase
         $this->container->expects($this->any())->method('getLocator')->willReturn($locator);
         $output = $hydrator->hydrate(OneToManyObject::class, ['id' => 1]);
         $this->assertCount(6, $output->getData());
+    }
+
+    public function testEagerLoadManyToManySet()
+    {
+        $hydrator = $this->getHydrator();
+        $repo = $this->trainContainerToReturnRepository($hydrator);
+        $repo->expects($this->once())->method('getManyToManyData')
+            ->with('main_to_target', 'target_table', 'main_id', 'target_id', 'id', [1, 2])
+            ->willReturn([
+                ['id' => 10, 'name' => 'One', '__pantono_join_id' => 1],
+                ['id' => 11, 'name' => 'Two', '__pantono_join_id' => 1],
+                ['id' => 12, 'name' => 'Three', '__pantono_join_id' => 2],
+            ]);
+
+        $output = $hydrator->hydrateSet(ManyToManyObject::class, [['id' => 1], ['id' => 2]]);
+
+        $this->assertCount(2, $output[0]->getTargets());
+        $this->assertCount(1, $output[1]->getTargets());
+        $this->assertEquals('One', $output[0]->getTargets()[0]->getName());
+        $this->assertEquals('Three', $output[1]->getTargets()[0]->getName());
+    }
+
+    public function testEagerLoadManyToManySingleModel()
+    {
+        $hydrator = $this->getHydrator();
+        $repo = $this->trainContainerToReturnRepository($hydrator);
+        $repo->expects($this->once())->method('getManyToManyData')
+            ->with('main_to_target', 'target_table', 'main_id', 'target_id', 'id', [1])
+            ->willReturn([
+                ['id' => 10, 'name' => 'One', '__pantono_join_id' => 1],
+                ['id' => 11, 'name' => 'Two', '__pantono_join_id' => 1],
+            ]);
+
+        $output = $hydrator->hydrate(ManyToManyObject::class, ['id' => 1]);
+
+        $this->assertCount(2, $output->getTargets());
+        $this->assertEquals('Two', $output->getTargets()[1]->getName());
     }
 
     public function testEagerLoadCollection()
