@@ -59,15 +59,15 @@ class EagerLoadRepository extends DefaultRepository
         string $joinColumn,
         string $relatedColumn,
         string $relatedIdColumn = 'id',
-        array $ids = []
+        array  $ids = []
     ): array
     {
         if (empty($ids)) {
             return [];
         }
         return $this->getDb()->fetchAll(
-            $this->getDb()->select('t.*, j.' . $joinColumn . ' as __pantono_join_id')->from($joinTable, 'j')
-                ->innerJoin('j', $tableName, 't', 'j.' . $relatedColumn . ' = t.' . $relatedIdColumn)
+            $this->getDb()->select('t.*, j.' . $joinColumn . ' as __pantono_join_id')->from($this->quoteTable($joinTable), 'j')
+                ->innerJoin('j', $this->quoteTable($tableName), 't', 'j.' . $relatedColumn . ' = t.' . $relatedIdColumn)
                 ->where('j.' . $joinColumn . ' in (:ids)')
                 ->setParameter('ids', $ids, ArrayParameterType::STRING)
         );
