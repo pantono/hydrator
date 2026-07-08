@@ -13,7 +13,7 @@ class EagerLoadRepository extends DefaultRepository
      * @param array<int|string> $ids
      * @param string|null $table
      * @param string|null $idColumn
-     * @return array<int,mixed>
+     * @return array<int, array<string, mixed>>
      */
     public function lookupRecords(string $model, array $ids = [], ?string $table = null, ?string $idColumn = null): array
     {
@@ -34,14 +34,16 @@ class EagerLoadRepository extends DefaultRepository
      * @param string $tableName
      * @param string $columnName
      * @param array<int|string> $ids
-     * @return array
+     * @return array<int, array<string, mixed>>
      */
     public function getDataIn(string $tableName, string $columnName, array $ids): array
     {
         $select = $this->getDb()->select('t.*')->from($tableName, 't')
             ->where('t.' . $columnName . ' in (:ids)')
             ->setParameter('ids', $ids, ArrayParameterType::STRING);
-        return $this->getDb()->fetchAll($select);
+        /** @var array<int, array<string, mixed>> $rows */
+        $rows = $this->getDb()->fetchAll($select);
+        return $rows;
     }
 
     /**
@@ -65,11 +67,13 @@ class EagerLoadRepository extends DefaultRepository
         if (empty($ids)) {
             return [];
         }
-        return $this->getDb()->fetchAll(
+        /** @var array<int, array<string, mixed>> $rows */
+        $rows = $this->getDb()->fetchAll(
             $this->getDb()->select('t.*, j.' . $joinColumn . ' as __pantono_join_id')->from($this->quoteTable($joinTable), 'j')
                 ->innerJoin('j', $this->quoteTable($tableName), 't', 'j.' . $relatedColumn . ' = t.' . $relatedIdColumn)
                 ->where('j.' . $joinColumn . ' in (:ids)')
                 ->setParameter('ids', $ids, ArrayParameterType::STRING)
         );
+        return $rows;
     }
 }

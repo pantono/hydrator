@@ -338,6 +338,7 @@ EAGER;
             $inverseJoinColumn = $args['inverseJoinColumn'] ?? $args[2] ?? null;
             if (
                 is_string($targetModel) &&
+                class_exists($targetModel) &&
                 is_string($joinTable) &&
                 is_string($joinColumn) &&
                 is_string($inverseJoinColumn)

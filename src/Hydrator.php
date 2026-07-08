@@ -333,14 +333,17 @@ class Hydrator implements HydratorInterface
             $args = $reflection->getLocator();
             $service = $args['serviceName'] ?? null;
             $methodName = $args['methodName'] ?? null;
-            $className = $args['className'] ?? null;
-            if ($className) {
-                $dep = $this->container->getLocator()->getClassAutoWire($className);
+            $locatorClassName = $args['className'] ?? null;
+            if ($locatorClassName) {
+                $dep = $this->container->getLocator()->getClassAutoWire($locatorClassName);
             } else {
+                if ($service === null) {
+                    throw new \RuntimeException('No locator service configured for ' . $className);
+                }
                 $dep = $this->container->getLocator()->loadDependency($service);
             }
             if (!$dep) {
-                throw new \RuntimeException('Unable to load dependency ' . ($service ?: $className) . '::' . $methodName);
+                throw new \RuntimeException('Unable to load dependency ' . ($service ?: $locatorClassName) . '::' . $methodName);
             }
 
             return $dep->$methodName($field);
@@ -398,6 +401,7 @@ class Hydrator implements HydratorInterface
         if (!$table || !$idColumn) {
             throw new \RuntimeException('Database table/id column not set for ' . $model);
         }
+        /** @var array<int, array<string, mixed>> $output */
         $output = $this->getRepository()->getManyToManyData($joinTable, $table, $joinColumn, $inverseJoinColumn, $idColumn, [$fieldValue]);
         foreach ($output as &$row) {
             if (isset($row['__pantono_join_id'])) {
@@ -540,13 +544,15 @@ class Hydrator implements HydratorInterface
                 }
             }
             $output = $repo->lookupRecords($model, $ids);
-            /** @var array<string, int|string> $row */
             foreach ($output as $row) {
                 foreach ($row as $column => $value) {
                     if ($value === null) {
                         continue;
                     }
                     if (isset($oneToOne[$column])) {
+                        if (!is_int($value) && !is_string($value)) {
+                            continue;
+                        }
                         /**
                          * @var class-string $lookupModel
                          */
@@ -554,8 +560,9 @@ class Hydrator implements HydratorInterface
                         $this->addDatabaseLookup($lookupModel, $value);
                     }
                 }
-                if (isset($row[$idColumn])) {
-                    $key = CacheHelper::cleanCacheKey($model . '__' . $row[$idColumn]);
+                $rowId = $row[$idColumn] ?? null;
+                if (is_int($rowId) || is_string($rowId)) {
+                    $key = CacheHelper::cleanCacheKey($model . '__' . $rowId);
                     EphemeralCacheHelper::setItem($key, $row);
                 }
             }
@@ -568,10 +575,14 @@ class Hydrator implements HydratorInterface
                 if (!$table) {
                     continue;
                 }
+                /** @var array<int, array<string, mixed>> $output */
                 $output = $repo->getDataIn($table, $mappedBy, $ids);
                 $results = [];
                 foreach ($output as $row) {
-                    $results[$row[$mappedBy]][] = $row;
+                    $mappedId = $row[$mappedBy] ?? null;
+                    if (is_int($mappedId) || is_string($mappedId)) {
+                        $results[$mappedId][] = $row;
+                    }
                 }
                 foreach ($ids as $id) {
                     $key = CacheHelper::cleanCacheKey($model . '__' . $mappedBy . '__' . $id);
@@ -592,11 +603,12 @@ class Hydrator implements HydratorInterface
                 foreach ($joinLookups as $joinColumn => $inverseLookups) {
                     foreach ($inverseLookups as $inverseJoinColumn => $ids) {
                         $ids = array_values(array_unique($ids));
+                        /** @var array<int, array<string, mixed>> $output */
                         $output = $repo->getManyToManyData($joinTable, $table, $joinColumn, $inverseJoinColumn, $idColumn, $ids);
                         $results = [];
                         foreach ($output as $row) {
                             $joinId = $row['__pantono_join_id'] ?? null;
-                            if ($joinId === null) {
+                            if (!is_int($joinId) && !is_string($joinId)) {
                                 continue;
                             }
                             unset($row['__pantono_join_id']);
@@ -637,6 +649,7 @@ class Hydrator implements HydratorInterface
             $inverseJoinColumn = $args['inverseJoinColumn'] ?? $args[2] ?? null;
             if (
                 is_string($targetModel) &&
+                class_exists($targetModel) &&
                 is_string($joinTable) &&
                 is_string($joinColumn) &&
                 is_string($inverseJoinColumn)
