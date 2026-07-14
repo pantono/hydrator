@@ -14,12 +14,22 @@ class Dto
         $this->locator = $locator;
     }
 
-    public function createDto(AbstractDto $dtoClass): AbstractDto
+    /**
+     * @param class-string $dtoClass
+     * @return AbstractDto
+     */
+    public function createDto(string $dtoClass): AbstractDto
     {
+        if (!class_exists($dtoClass)) {
+            throw new \InvalidArgumentException('Invalid DTO class provided');
+        }
         /**
          * @var AbstractDto $dto
          */
-        $dto = $this->locator->getClassAutoWire($dtoClass::class);
+        $dto = $this->locator->getClassAutoWire($dtoClass);
+        if (!$dto instanceof AbstractDto) {
+            throw new \InvalidArgumentException('Invalid DTO class provided');
+        }
         $dto->setLocator($this->locator);
         return $dto;
     }
