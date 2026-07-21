@@ -15,8 +15,9 @@ class Dto
     }
 
     /**
-     * @param class-string $dtoClass
-     * @return AbstractDto
+     * @template TDto of AbstractDto<object>
+     * @param class-string<TDto> $dtoClass
+     * @return TDto
      */
     public function createDto(string $dtoClass): AbstractDto
     {
@@ -24,7 +25,7 @@ class Dto
             throw new \InvalidArgumentException('Invalid DTO class provided');
         }
         /**
-         * @var AbstractDto $dto
+         * @var TDto $dto
          */
         $dto = $this->locator->getClassAutoWire($dtoClass);
         if (!$dto instanceof AbstractDto) {

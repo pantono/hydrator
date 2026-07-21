@@ -5,6 +5,9 @@ namespace Pantono\Hydrator\Dto;
 use Pantono\Contracts\Locator\LocatorInterface;
 use Symfony\Component\HttpFoundation\ParameterBag;
 
+/**
+ * @template TModel of object
+ */
 abstract class AbstractDto
 {
     private LocatorInterface $locator;
@@ -19,5 +22,9 @@ abstract class AbstractDto
         $this->locator = $locator;
     }
 
-    abstract public function transform(ParameterBag $parameters): mixed;
+    /**
+     * @param TModel|null $baseModel
+     * @return TModel
+     */
+    abstract public function transform(ParameterBag $parameters, ?object $baseModel = null): mixed;
 }
