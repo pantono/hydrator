@@ -38,7 +38,7 @@ class EagerLoadRepository extends DefaultRepository
      */
     public function getDataIn(string $tableName, string $columnName, array $ids): array
     {
-        $select = $this->getDb()->select('t.*')->from($tableName, 't')
+        $select = $this->getDb()->select('t.*')->from($this->quoteTable($tableName), 't')
             ->where('t.' . $columnName . ' in (:ids)')
             ->setParameter('ids', $ids, ArrayParameterType::STRING);
         /** @var array<int, array<string, mixed>> $rows */
@@ -52,7 +52,7 @@ class EagerLoadRepository extends DefaultRepository
      */
     public function getAll(string $tableName): array
     {
-        $select = $this->getDb()->select('t.*')->from($tableName, 't');
+        $select = $this->getDb()->select('t.*')->from($this->quoteTable($tableName), 't');
         /** @var array<int, array<string, mixed>> $rows */
         $rows = $this->getDb()->fetchAll($select);
         return $rows;
