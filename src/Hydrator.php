@@ -94,7 +94,7 @@ class Hydrator implements HydratorInterface
     /**
      * @template T of object
      * @param class-string<T> $className
-     * @param array<int, mixed>|null $hydrateData
+     * @param array<int|string, mixed>|null $hydrateData
      * @return T|null
      * @throws \ReflectionException
      */
