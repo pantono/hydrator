@@ -381,6 +381,21 @@ class Hydrator implements HydratorInterface
     /**
      * @template T of object
      * @param class-string<T> $model
+     * @return array<T>
+     */
+    public function lookupAll(string $model): array
+    {
+        $reflection = new PantonoReflectionModel($model);
+        $table = $reflection->getDatabaseTable();
+        if (!$table) {
+            throw new \RuntimeException('Database table not set for ' . $model);
+        }
+        return $this->hydrateSet($model, $this->getRepository()->getAll($table));
+    }
+
+    /**
+     * @template T of object
+     * @param class-string<T> $model
      * @param string $joinTable
      * @param string $joinColumn
      * @param string $inverseJoinColumn
@@ -388,10 +403,10 @@ class Hydrator implements HydratorInterface
      * @return array<T>
      */
     public function lookupManyToManyRecords(
-        string $model,
-        string $joinTable,
-        string $joinColumn,
-        string $inverseJoinColumn,
+        string     $model,
+        string     $joinTable,
+        string     $joinColumn,
+        string     $inverseJoinColumn,
         int|string $fieldValue
     ): array
     {
@@ -500,10 +515,10 @@ class Hydrator implements HydratorInterface
     }
 
     private function addManyToManyLookup(
-        string $className,
-        string $joinTable,
-        string $joinColumn,
-        string $inverseJoinColumn,
+        string     $className,
+        string     $joinTable,
+        string     $joinColumn,
+        string     $inverseJoinColumn,
         int|string $id
     ): void
     {

@@ -47,6 +47,18 @@ class EagerLoadRepository extends DefaultRepository
     }
 
     /**
+     * @param string $tableName
+     * @return array<int, array<string, mixed>>
+     */
+    public function getAll(string $tableName): array
+    {
+        $select = $this->getDb()->select('t.*')->from($tableName, 't');
+        /** @var array<int, array<string, mixed>> $rows */
+        $rows = $this->getDb()->fetchAll($select);
+        return $rows;
+    }
+
+    /**
      * @param string $joinTable
      * @param string $tableName
      * @param string $joinColumn
