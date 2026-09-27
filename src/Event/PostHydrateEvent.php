@@ -8,7 +8,7 @@ class PostHydrateEvent extends Event
 {
     private string $className;
     /**
-     * @var array<int,mixed>
+     * @var array<int|string,mixed>
      */
     private array $hydrateData;
     private ?object $result;
@@ -16,7 +16,7 @@ class PostHydrateEvent extends Event
     /**
      * @template T of object
      * @param class-string<T> $className
-     * @param array<int,mixed> $hydrateData
+     * @param array<int|string,mixed> $hydrateData
      * @param T|null $result
      */
     public function __construct(string $className, array $hydrateData, ?object $result = null)

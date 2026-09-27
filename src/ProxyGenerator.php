@@ -11,12 +11,13 @@ use ReflectionNamedType;
 use Pantono\Hydrator\Traits\LocatorAwareTrait;
 use Pantono\Utilities\Model\PantonoReflectionModel;
 use Pantono\Utilities\Model\PantonoReflectionProperty;
-use Pantono\Utilities\EphemeralCacheHelper;
 use Pantono\Contracts\Attributes\DatabaseTable;
 use Pantono\Contracts\Attributes\Database\ManyToMany as ManyToManyAttribute;
 
 class ProxyGenerator
 {
+    public const CACHE_VERSION = '3';
+
     public function generateProxyClass(string $className): string
     {
         if (!class_exists($className)) {
@@ -40,12 +41,12 @@ class ProxyGenerator
         $namespace->addUse(LocatorAwareTrait::class);
         $class->addTrait(LocatorAwareTrait::class);
         $namespace->addUse($className);
-        $namespace->addUse(EphemeralCacheHelper::class);
         $namespace->addUse(ProxyInterface::class);
         $class->addImplement(ProxyInterface::class);
 
         $class->addProperty('hydratorParams')->setType('array')->setValue([])->setVisibility('private');
         $class->addProperty('completedLookups')->setType('array')->setValue([])->setVisibility('private');
+
 
         $getMagic = $class->addMethod('__get');
         $getMagic->addParameter('name')->setType('string');
@@ -152,6 +153,23 @@ SETTER_BODY;
         return '<?php' . PHP_EOL . $printer->printNamespace($namespace);
     }
 
+    private function lookupMethod(string $getter, string $lookup): string
+    {
+        return <<<BODY
+if (isset(\$this->completedLookups['$getter'])) {
+    return parent::{$getter}();
+}
+\$this->completedLookups['$getter'] = true;
+try {
+$lookup
+    return parent::{$getter}();
+} catch (\\Throwable \$exception) {
+    unset(\$this->completedLookups['$getter']);
+    throw \$exception;
+}
+BODY;
+    }
+
     private function cloneMethod(\ReflectionMethod $reflectionMethod, ClassType $class, PhpNamespace $namespace): Method
     {
         $method = $class->addMethod($reflectionMethod->getName());
@@ -201,18 +219,12 @@ SETTER_BODY;
             throw new \RuntimeException('Cannot generate proxy method for property ' . $property->getFieldName());
         }
         $lookupMethod = $property->getLocatorMethodName();
-        return <<<METHOD_BODY
-global \$app;
-if (isset(\$this->completedLookups['$getter'])) {
-    return parent::$getter();
-}
-\$this->completedLookups['$getter'] = true;
+        return $this->lookupMethod($getter, <<<METHOD_BODY
 \$value = $lookupValue?\$this->getLocator()->$locatorMethod('$lookupDependency')->$lookupMethod($lookupValue):null;
 if (\$value) {
     parent::{$setter}(\$value);
 }
-return parent::{$getter}();
-METHOD_BODY;
+METHOD_BODY);
     }
 
     private function singleCachedLookupMethod(PantonoReflectionProperty $property): string
@@ -221,28 +233,14 @@ METHOD_BODY;
         $getter = $property->getGetter();
         $fieldName = $property->getFieldName();
         $lookupValue = "\$this->hydratorParams['$fieldName']";
-        $model = $property->getType();
-        return <<<EAGER
-if (isset(\$this->completedLookups['$getter']) && \$this->completedLookups['$getter'] === true) {
-    return parent::{$getter}();
-}
-\$this->completedLookups['$getter'] = true;
-\$hydrator = \$this->getLocator()->loadDependency('@Hydrator');
-\$key = \Pantono\Utilities\CacheHelper::cleanCacheKey('{$model}__' . $lookupValue);
-\$cachedValue = EphemeralCacheHelper::get(\$key);
-/**
-* @var \Pantono\Hydrator\Hydrator \$hydrator
-*/
-if (!\$cachedValue) {
-    \$value = \$hydrator->lookupRecord(\\$model::class, $lookupValue); 
-} else {
-    \$value = \$hydrator->hydrate(\\$model::class, \$cachedValue);
-}
+        $model = $property->getOneToOne() ?? $property->getTargetType();
+        return $this->lookupMethod($getter, <<<EAGER
+\$hydrator = \\Pantono\\Hydrator\\ProxyHydratorRegistry::get(\$this) ?? \$this->getLocator()->loadDependency('@Hydrator');
+\$value = \$hydrator->lookupRecord(\\$model::class, $lookupValue ?? null);
 if (\$value) {
     parent::{$setter}(\$value);
 }
-return parent::{$getter}();
-EAGER;
+EAGER);
     }
 
     /**
@@ -259,26 +257,11 @@ EAGER;
         $idColumn = $parentReflection->getDatabaseIdColumn();
         $lookupValue = "\$this->hydratorParams['$idColumn']";
 
-        return <<<EAGER
-if (isset(\$this->completedLookups['$getter']) && \$this->completedLookups['$getter'] === true) {
-    return parent::{$getter}();
-}
-\$this->completedLookups['$getter'] = true;
-\$hydrator = \$this->getLocator()->loadDependency('@Hydrator');
-\$key = \Pantono\Utilities\CacheHelper::cleanCacheKey('{$model}__' . '$mappedBy' . '__' . $lookupValue);
-\$cachedValue = EphemeralCacheHelper::get(\$key);
-/**
-* @var \Pantono\Hydrator\Hydrator \$hydrator
-*/
-\$value = [];
-if (\$cachedValue !== null) {
-    \$value = \$hydrator->hydrateSet(\\$model::class, \$cachedValue);
-} else {
-    \$value = \$hydrator->lookupRecords(\\$model::class, '$mappedBy', $lookupValue);
-}
+        return $this->lookupMethod($getter, <<<EAGER
+\$hydrator = \\Pantono\\Hydrator\\ProxyHydratorRegistry::get(\$this) ?? \$this->getLocator()->loadDependency('@Hydrator');
+\$value = isset($lookupValue) ? \$hydrator->lookupRecords(\\$model::class, '$mappedBy', $lookupValue) : [];
 parent::{$setter}(\$value);
-return parent::{$getter}();
-EAGER;
+EAGER);
     }
 
     /**
@@ -302,26 +285,11 @@ EAGER;
         $idColumn = $parentReflection->getDatabaseIdColumn();
         $lookupValue = "\$this->hydratorParams['$idColumn']";
 
-        return <<<EAGER
-if (isset(\$this->completedLookups['$getter']) && \$this->completedLookups['$getter'] === true) {
-    return parent::{$getter}();
-}
-\$this->completedLookups['$getter'] = true;
-\$hydrator = \$this->getLocator()->loadDependency('@Hydrator');
-\$key = \Pantono\Utilities\CacheHelper::cleanCacheKey('{$model}__' . '$joinTable' . '__' . '$joinColumn' . '__' . '$inverseJoinColumn' . '__' . $lookupValue);
-\$cachedValue = EphemeralCacheHelper::get(\$key);
-/**
-* @var \Pantono\Hydrator\Hydrator \$hydrator
-*/
-\$value = [];
-if (\$cachedValue !== null) {
-    \$value = \$hydrator->hydrateSet(\\$model::class, \$cachedValue);
-} else {
-    \$value = \$hydrator->lookupManyToManyRecords(\\$model::class, '$joinTable', '$joinColumn', '$inverseJoinColumn', $lookupValue);
-}
+        return $this->lookupMethod($getter, <<<EAGER
+\$hydrator = \\Pantono\\Hydrator\\ProxyHydratorRegistry::get(\$this) ?? \$this->getLocator()->loadDependency('@Hydrator');
+\$value = isset($lookupValue) ? \$hydrator->lookupManyToManyRecords(\\$model::class, '$joinTable', '$joinColumn', '$inverseJoinColumn', $lookupValue) : [];
 parent::{$setter}(\$value);
-return parent::{$getter}();
-EAGER;
+EAGER);
     }
 
     /**

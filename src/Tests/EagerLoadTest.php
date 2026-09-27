@@ -175,27 +175,22 @@ class EagerLoadTest extends TestCase
         $this->assertEquals($expected, $output[0]);
     }
 
-    public function testEagerLoadNotCached()
+    public function testEagerLoadMissingRecord(): void
     {
-        $expected = new EagerLoadModel();
-        $expected->setId(1);
-        $lookup = new DatabaseLookupModel();
-        $lookup->setId(1);
-        $expected->setLookupModel($lookup);
         $hydrator = $this->getHydrator();
         $repo = $this->trainContainerToReturnRepository($hydrator);
         $repo->expects($this->once())->method('lookupRecords')->with(DatabaseLookupModel::class, [1])
             ->willReturn([]);
+        $repo->expects($this->never())->method('selectSingleRow');
         $output = $hydrator->hydrateSet(EagerLoadModel::class, [['id' => 1, 'lookup_model' => 1]]);
-        $this->assertInstanceOf(EagerLoadModel::class, $output[0]);
-        $this->assertEquals($lookup, $output[0]->getLookupModel());
+        $this->assertNull($output[0]->getLookupModel());
     }
 
     public function testEagerLoadMultipleLevels()
     {
         $hydrator = $this->getHydrator();
         $repo = $this->trainContainerToReturnRepository($hydrator);
-        $repo->expects($this->any())->method('lookupRecords')
+        $repo->expects($this->exactly(2))->method('lookupRecords')
             ->willReturnCallback(function (string $input, array $ids) {
                 if ($input === 'Pantono\Hydrator\Tests\MockObjects\DeepEagerLoadFirstLevel') {
                     return [['id' => 1, 'second' => 2]];
@@ -210,7 +205,7 @@ class EagerLoadTest extends TestCase
         $second->setOutput('string');
         $first->setSecond($second);
         $expected->setModel($first);
-        $output = $this->getHydrator()->hydrateSet(DeepEagerLoadTopLevel::class, [['id' => 1, 'model' => 1]]);
+        $output = $hydrator->hydrateSet(DeepEagerLoadTopLevel::class, [['id' => 1, 'model' => 1]]);
         $this->assertEquals($second->getOutput(), $output[0]->getModel()->getSecond()->getOutput());
     }
 

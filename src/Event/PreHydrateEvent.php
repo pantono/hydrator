@@ -8,13 +8,13 @@ class PreHydrateEvent extends Event
 {
     private string $className;
     /**
-     * @var array<int,mixed>
+     * @var array<int|string,mixed>
      */
     private array $hydrateData;
 
     /**
      * @param class-string $className
-     * @param array<int,mixed> $hydrateData
+     * @param array<int|string,mixed> $hydrateData
      */
     public function __construct(string $className, array $hydrateData)
     {
@@ -33,7 +33,7 @@ class PreHydrateEvent extends Event
     }
 
     /**
-     * @param array<int,mixed> $hydrateData
+     * @param array<int|string,mixed> $hydrateData
      */
     public function setHydrateData(array $hydrateData): void
     {

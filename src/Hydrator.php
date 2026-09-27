@@ -18,7 +18,6 @@ use Psr\EventDispatcher\EventDispatcherInterface;
 use Pantono\Utilities\Model\PantonoReflectionModel;
 use Pantono\Utilities\Model\PantonoReflectionProperty;
 use Pantono\Hydrator\Repository\EagerLoadRepository;
-use Pantono\Utilities\EphemeralCacheHelper;
 use Pantono\Contracts\Attributes\Database\ManyToMany as ManyToManyAttribute;
 
 class Hydrator implements HydratorInterface
@@ -26,18 +25,7 @@ class Hydrator implements HydratorInterface
     private ContainerInterface $container;
     private EventDispatcherInterface $dispatcher;
     private ?ApplicationCacheInterface $cache;
-    /**
-     * @var array<class-string, array<int|string>>
-     */
-    private array $pendingModelLookups = [];
-    /**
-     * @var array<class-string, array<string, array<int|string>>>
-     */
-    private array $pendingOneToManyLookups = [];
-    /**
-     * @var array<class-string, array<string, array<string, array<string, array<int|string>>>>>
-     */
-    private array $pendingManyToManyLookups = [];
+    private RelationLoader $relationLoader;
     private bool $isHydratingSet = false;
 
     public function __construct(ContainerInterface $container, EventDispatcherInterface $dispatcher, ?ApplicationCacheInterface $cache = null)
@@ -45,6 +33,7 @@ class Hydrator implements HydratorInterface
         $this->container = $container;
         $this->dispatcher = $dispatcher;
         $this->cache = $cache;
+        $this->relationLoader = new RelationLoader(fn(): EagerLoadRepository => $this->getRepository());
     }
 
     /**
@@ -86,8 +75,33 @@ class Hydrator implements HydratorInterface
 
     public function clearCache(string $key): void
     {
+        $this->clearRelationCache();
         if ($this->cache) {
             $this->cache->delete($key);
+        }
+    }
+
+    /** Clear raw relation results after writes or between jobs in a long-running worker. */
+    public function clearRelationCache(): void
+    {
+        $this->relationLoader->reset();
+    }
+
+    /**
+     * @template T of object
+     * @param class-string<T> $className
+     * @param array<int|string, mixed>|null $hydrateData
+     * @param list<string> $relations Explicit nested relation paths using property names.
+     * @return T|null
+     * @throws \ReflectionException
+     */
+    public function hydrate(string $className, ?array $hydrateData = [], array $relations = []): ?object
+    {
+        try {
+            return $this->hydrateObject($className, $hydrateData, $relations);
+        } catch (\Throwable $exception) {
+            $this->relationLoader->discardPending();
+            throw $exception;
         }
     }
 
@@ -95,10 +109,10 @@ class Hydrator implements HydratorInterface
      * @template T of object
      * @param class-string<T> $className
      * @param array<int|string, mixed>|null $hydrateData
+     * @param list<string> $relations
      * @return T|null
-     * @throws \ReflectionException
      */
-    public function hydrate(string $className, ?array $hydrateData = []): ?object
+    private function hydrateObject(string $className, ?array $hydrateData, array $relations): ?object
     {
         if ($hydrateData === null) {
             return null;
@@ -125,8 +139,8 @@ class Hydrator implements HydratorInterface
             if (method_exists($class, 'setHydratorParams')) {
                 $class->setHydratorParams($hydrateData);
             }
+            ProxyHydratorRegistry::bind($class, $this);
         }
-        $isEagerLoad = $pantonoReflection->isEagerLoad();
         foreach ($pantonoReflection->getProperties() as $property) {
             $field = $property->getFieldName();
             $type = $property->getType();
@@ -226,35 +240,6 @@ class Hydrator implements HydratorInterface
                             }
                         }
                     } else {
-                        if ($isEagerLoad && $data) {
-                            $targetType = $property->getTargetType();
-                            $oneToOne = $property->getOneToOne();
-                            if ($oneToOne) {
-                                if (class_exists($oneToOne)) {
-                                    $this->addDatabaseLookup($oneToOne, $data);
-                                }
-                            } elseif ($targetType && class_exists($targetType)) {
-                                $this->addDatabaseLookup($targetType, $data);
-                            }
-                        }
-                        $oneToMany = $property->getOneToManyModel();
-                        if ($oneToMany && $isEagerLoad) {
-                            $mappedBy = $property->getOneToManyMappedBy();
-                            $idColumn = $pantonoReflection->getDatabaseIdColumn();
-                            if ($idColumn && isset($hydrateData[$idColumn]) && $mappedBy) {
-                                $this->addOneToManyLookup($oneToMany, $mappedBy, $hydrateData[$idColumn]);
-                            }
-                        }
-                        $manyToMany = $manyToManyConfig['targetModel'] ?? null;
-                        if ($manyToMany && $isEagerLoad) {
-                            $joinTable = $manyToManyConfig['joinTable'] ?? null;
-                            $joinColumn = $manyToManyConfig['joinColumn'] ?? null;
-                            $inverseJoinColumn = $manyToManyConfig['inverseJoinColumn'] ?? null;
-                            $idColumn = $pantonoReflection->getDatabaseIdColumn();
-                            if ($joinTable && $joinColumn && $inverseJoinColumn && $idColumn && isset($hydrateData[$idColumn])) {
-                                $this->addManyToManyLookup($manyToMany, $joinTable, $joinColumn, $inverseJoinColumn, $hydrateData[$idColumn]);
-                            }
-                        }
                         $data = null;
                     }
                 }
@@ -266,6 +251,7 @@ class Hydrator implements HydratorInterface
                 }
             }
         }
+        $this->relationLoader->discover($className, $hydrateData, $relations);
         $event = new PostHydrateEvent($className, $hydrateData, $class);
         $this->dispatcher->dispatch($event);
         /** @var T $result */
@@ -277,35 +263,41 @@ class Hydrator implements HydratorInterface
      * @template T of object
      * @param class-string<T> $className
      * @param array<int,array<string,mixed>> $data
+     * @param list<string> $relations Explicit paths augment EagerLoad and may select Lazy relations.
      * @return array<T>
      */
-    public function hydrateSet(string $className, array $data): array
+    public function hydrateSet(string $className, array $data, array $relations = []): array
     {
-        $outermost = false;
-        if ($this->isHydratingSet === false) {
-            $this->isHydratingSet = true;
-            $outermost = true;
-        }
-        $event = new PreHydrateSetEvent($className, $data);
-        $this->dispatcher->dispatch($event);
-        $data = $event->getHydrateData();
-        $items = [];
-        foreach ($data as $item) {
-            $hydrated = $this->hydrate($className, $item);
-            if ($hydrated !== null) {
-                $items[] = $hydrated;
+        $outermost = !$this->isHydratingSet;
+        $this->isHydratingSet = true;
+        try {
+            $event = new PreHydrateSetEvent($className, $data);
+            $this->dispatcher->dispatch($event);
+            $data = $event->getHydrateData();
+            $items = [];
+            foreach ($data as $item) {
+                $hydrated = $this->hydrate($className, $item, $relations);
+                if ($hydrated !== null) {
+                    $items[] = $hydrated;
+                }
+            }
+
+            $event = new PostHydrateSetEvent($className, $data, $items);
+            $this->dispatcher->dispatch($event);
+            if ($outermost) {
+                $this->doPendingCacheLookups();
+            }
+            /** @var array<T> $result */
+            $result = $event->getResult();
+            return $result;
+        } catch (\Throwable $exception) {
+            $this->relationLoader->discardPending();
+            throw $exception;
+        } finally {
+            if ($outermost) {
+                $this->isHydratingSet = false;
             }
         }
-
-        $event = new PostHydrateSetEvent($className, $data, $items);
-        $this->dispatcher->dispatch($event);
-        if ($outermost) {
-            $this->doPendingCacheLookups();
-            $this->isHydratingSet = false;
-        }
-        /** @var array<T> $result */
-        $result = $event->getResult();
-        return $result;
     }
 
     /**
@@ -321,6 +313,10 @@ class Hydrator implements HydratorInterface
         if (!class_exists($className)) {
             throw new \RuntimeException('Class ' . $className . ' does not exist');
         }
+        $reflection = new PantonoReflectionModel($className);
+        if (!$reflection->getLocator() && (is_int($field) || is_string($field)) && $this->relationLoader->hasRow($className, $field)) {
+            return $this->hydrate($className, $this->relationLoader->getRow($className, $field));
+        }
         if ($this->cache) {
             $key = CacheHelper::cleanCacheKey($className . '__' . $field);
             $value = $this->cache->get($key);
@@ -328,7 +324,6 @@ class Hydrator implements HydratorInterface
                 return $this->hydrate($className, $value);
             }
         }
-        $reflection = new PantonoReflectionModel($className);
         if ($reflection->getLocator()) {
             $args = $reflection->getLocator();
             $service = $args['serviceName'] ?? null;
@@ -353,7 +348,7 @@ class Hydrator implements HydratorInterface
             if (!is_string($field) && !is_int($field)) {
                 return null;
             }
-            $row = $this->getRepository()->selectSingleRow($reflection->getDatabaseTable(), $reflection->getDatabaseIdColumn(), $field);
+            $row = $this->relationLoader->getRow($className, $field);
             if ($row) {
                 return $this->hydrate($className, $row);
             }
@@ -370,12 +365,7 @@ class Hydrator implements HydratorInterface
      */
     public function lookupRecords(string $model, string $column, int|string $fieldValue): array
     {
-        $reflection = new PantonoReflectionModel($model);
-        $table = $reflection->getDatabaseTable();
-        if (!$table) {
-            throw new \RuntimeException('Database table not set for ' . $model);
-        }
-        return $this->hydrateSet($model, $this->getRepository()->getDataIn($table, $column, [$fieldValue]));
+        return $this->hydrateSet($model, $this->relationLoader->getRows($model, 'many', [$column], $fieldValue));
     }
 
     /**
@@ -410,21 +400,9 @@ class Hydrator implements HydratorInterface
         int|string $fieldValue
     ): array
     {
-        $reflection = new PantonoReflectionModel($model);
-        $table = $reflection->getDatabaseTable();
-        $idColumn = $reflection->getDatabaseIdColumn();
-        if (!$table || !$idColumn) {
-            throw new \RuntimeException('Database table/id column not set for ' . $model);
-        }
-        /** @var array<int, array<string, mixed>> $output */
-        $output = $this->getRepository()->getManyToManyData($joinTable, $table, $joinColumn, $inverseJoinColumn, $idColumn, [$fieldValue]);
-        foreach ($output as &$row) {
-            if (isset($row['__pantono_join_id'])) {
-                unset($row['__pantono_join_id']);
-            }
-        }
-        unset($row);
-        return $this->hydrateSet($model, $output);
+        return $this->hydrateSet($model, $this->relationLoader->getRows(
+            $model, 'join', [$joinTable, $joinColumn, $inverseJoinColumn], $fieldValue
+        ));
     }
 
     /**
@@ -443,7 +421,7 @@ class Hydrator implements HydratorInterface
         if (!$filename) {
             throw new \RuntimeException('Unable to get filename for ' . $className);
         }
-        $cacheKey = md5(filemtime($filename) . $className . ApplicationHelper::getReleaseTimestamp());
+        $cacheKey = md5(filemtime($filename) . $className . ApplicationHelper::getReleaseTimestamp() . ProxyGenerator::CACHE_VERSION);
         $target = $dir . $cacheKey . '.php';
         $proxyClassName = $reflection->getShortName() . 'ProxyClass';
         if (!file_exists($target)) {
@@ -489,156 +467,9 @@ class Hydrator implements HydratorInterface
         return array_filter($fields);
     }
 
-    /**
-     * @param class-string $className
-     * @param string|int $id
-     * @return void
-     */
-    private function addDatabaseLookup(string $className, string|int $id): void
-    {
-        if (!isset($this->pendingModelLookups[$className])) {
-            $this->pendingModelLookups[$className] = [];
-        }
-        $this->pendingModelLookups[$className][] = $id;
-    }
-
-    private function addOneToManyLookup(string $className, string $mappedBy, string|int $id): void
-    {
-        /** @var class-string $className */
-        if (!isset($this->pendingOneToManyLookups[$className])) {
-            $this->pendingOneToManyLookups[$className] = [];
-        }
-        if (!isset($this->pendingOneToManyLookups[$className][$mappedBy])) {
-            $this->pendingOneToManyLookups[$className][$mappedBy] = [];
-        }
-        $this->pendingOneToManyLookups[$className][$mappedBy][] = $id;
-    }
-
-    private function addManyToManyLookup(
-        string     $className,
-        string     $joinTable,
-        string     $joinColumn,
-        string     $inverseJoinColumn,
-        int|string $id
-    ): void
-    {
-        /** @var class-string $className */
-        if (!isset($this->pendingManyToManyLookups[$className])) {
-            $this->pendingManyToManyLookups[$className] = [];
-        }
-        if (!isset($this->pendingManyToManyLookups[$className][$joinTable])) {
-            $this->pendingManyToManyLookups[$className][$joinTable] = [];
-        }
-        if (!isset($this->pendingManyToManyLookups[$className][$joinTable][$joinColumn])) {
-            $this->pendingManyToManyLookups[$className][$joinTable][$joinColumn] = [];
-        }
-        if (!isset($this->pendingManyToManyLookups[$className][$joinTable][$joinColumn][$inverseJoinColumn])) {
-            $this->pendingManyToManyLookups[$className][$joinTable][$joinColumn][$inverseJoinColumn] = [];
-        }
-        $this->pendingManyToManyLookups[$className][$joinTable][$joinColumn][$inverseJoinColumn][] = $id;
-    }
-
     public function doPendingCacheLookups(): void
     {
-        if (empty($this->pendingModelLookups) && empty($this->pendingOneToManyLookups) && empty($this->pendingManyToManyLookups)) {
-            return;
-        }
-        $repo = $this->getRepository();
-        foreach ($this->pendingModelLookups as $model => $ids) {
-            $pantonoReflection = new PantonoReflectionModel($model);
-            $idColumn = $pantonoReflection->getDatabaseIdColumn();
-            if (!$idColumn) {
-                unset($this->pendingModelLookups[$model]);
-                continue;
-            }
-            /** @var array<string, class-string> $oneToOne */
-            $oneToOne = [];
-            foreach ($pantonoReflection->getProperties() as $property) {
-                if ($property->getOneToOne()) {
-                    $oneToOne[$property->getFieldName()] = $property->getOneToOne();
-                }
-            }
-            $output = $repo->lookupRecords($model, $ids);
-            foreach ($output as $row) {
-                foreach ($row as $column => $value) {
-                    if ($value === null) {
-                        continue;
-                    }
-                    if (isset($oneToOne[$column])) {
-                        if (!is_int($value) && !is_string($value)) {
-                            continue;
-                        }
-                        /**
-                         * @var class-string $lookupModel
-                         */
-                        $lookupModel = $oneToOne[$column];
-                        $this->addDatabaseLookup($lookupModel, $value);
-                    }
-                }
-                $rowId = $row[$idColumn] ?? null;
-                if (is_int($rowId) || is_string($rowId)) {
-                    $key = CacheHelper::cleanCacheKey($model . '__' . $rowId);
-                    EphemeralCacheHelper::setItem($key, $row);
-                }
-            }
-            unset($this->pendingModelLookups[$model]);
-        }
-        foreach ($this->pendingOneToManyLookups as $model => $lookups) {
-            foreach ($lookups as $mappedBy => $ids) {
-                $pantonoReflection = new PantonoReflectionModel($model);
-                $table = $pantonoReflection->getDatabaseTable();
-                if (!$table) {
-                    continue;
-                }
-                /** @var array<int, array<string, mixed>> $output */
-                $output = $repo->getDataIn($table, $mappedBy, $ids);
-                $results = [];
-                foreach ($output as $row) {
-                    $mappedId = $row[$mappedBy] ?? null;
-                    if (is_int($mappedId) || is_string($mappedId)) {
-                        $results[$mappedId][] = $row;
-                    }
-                }
-                foreach ($ids as $id) {
-                    $key = CacheHelper::cleanCacheKey($model . '__' . $mappedBy . '__' . $id);
-                    EphemeralCacheHelper::setItem($key, $results[$id] ?? []);
-                }
-            }
-            unset($this->pendingOneToManyLookups[$model]);
-        }
-        foreach ($this->pendingManyToManyLookups as $model => $tableLookups) {
-            $pantonoReflection = new PantonoReflectionModel($model);
-            $table = $pantonoReflection->getDatabaseTable();
-            $idColumn = $pantonoReflection->getDatabaseIdColumn();
-            if (!$table || !$idColumn) {
-                unset($this->pendingManyToManyLookups[$model]);
-                continue;
-            }
-            foreach ($tableLookups as $joinTable => $joinLookups) {
-                foreach ($joinLookups as $joinColumn => $inverseLookups) {
-                    foreach ($inverseLookups as $inverseJoinColumn => $ids) {
-                        $ids = array_values(array_unique($ids));
-                        /** @var array<int, array<string, mixed>> $output */
-                        $output = $repo->getManyToManyData($joinTable, $table, $joinColumn, $inverseJoinColumn, $idColumn, $ids);
-                        $results = [];
-                        foreach ($output as $row) {
-                            $joinId = $row['__pantono_join_id'] ?? null;
-                            if (!is_int($joinId) && !is_string($joinId)) {
-                                continue;
-                            }
-                            unset($row['__pantono_join_id']);
-                            $results[$joinId][] = $row;
-                        }
-                        foreach ($ids as $id) {
-                            $key = CacheHelper::cleanCacheKey($model . '__' . $joinTable . '__' . $joinColumn . '__' . $inverseJoinColumn . '__' . $id);
-                            EphemeralCacheHelper::setItem($key, $results[$id] ?? []);
-                        }
-                    }
-                }
-            }
-            unset($this->pendingManyToManyLookups[$model]);
-        }
-        $this->doPendingCacheLookups();
+        $this->relationLoader->flush();
     }
 
     private function getRepository(): EagerLoadRepository

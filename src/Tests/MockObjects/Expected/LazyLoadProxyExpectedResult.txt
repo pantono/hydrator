@@ -5,7 +5,6 @@ use Pantono\Contracts\Application\Proxy\ProxyInterface;
 use Pantono\Hydrator\Tests\MockObjects\BoolModel;
 use Pantono\Hydrator\Tests\MockObjects\LazyLoadModel;
 use Pantono\Hydrator\Traits\LocatorAwareTrait;
-use Pantono\Utilities\EphemeralCacheHelper;
 
 class LazyLoadModelProxyClass extends LazyLoadModel implements ProxyInterface
 {
@@ -52,16 +51,20 @@ class LazyLoadModelProxyClass extends LazyLoadModel implements ProxyInterface
 
     public function getTest(): BoolModel
     {
-        global $app;
         if (isset($this->completedLookups['getTest'])) {
             return parent::getTest();
         }
         $this->completedLookups['getTest'] = true;
+        try {
         $value = $this->hydratorParams['test_field']?$this->getLocator()->loadDependency('SomeClass')->getSomeMethod($this->hydratorParams['test_field']):null;
         if ($value) {
             parent::setTest($value);
         }
-        return parent::getTest();
+            return parent::getTest();
+        } catch (\Throwable $exception) {
+            unset($this->completedLookups['getTest']);
+            throw $exception;
+        }
     }
 
     public function setTest(BoolModel $test): void
